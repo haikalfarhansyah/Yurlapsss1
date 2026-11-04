@@ -351,6 +351,220 @@ def check_workflow_tools() -> bool:
     return True
 
 
+def check_design_doc() -> bool:
+    """Dokumen rancangan akun/club/sinkronisasi harus ada dan konsisten."""
+    doc = ROOT / "docs" / "RANCANGAN-AKUN-CLUB-SINKRONISASI.md"
+    if not doc.is_file():
+        print("  HILANG  docs/RANCANGAN-AKUN-CLUB-SINKRONISASI.md")
+        return False
+    teks = doc.read_text(encoding="utf-8", errors="replace")
+    wajib = ["profiles", "transponders", "clubs", "club_members",
+             "race_sessions", "client_uid", "sync_state"]
+    kurang = [k for k in wajib if k not in teks]
+    if kurang:
+        print(f"  GAGAL    rancangan belum membahas: {', '.join(kurang)}")
+        return False
+    if "Windows 8" in teks and "dihapus" not in teks:
+        print("  GAGAL    rancangan masih menjanjikan Windows 8")
+        return False
+    print("  ok       rancangan akun/club/sinkronisasi lengkap")
+    return True
+
+
+def check_design_decisions() -> bool:
+    """Keputusan desain yang sudah disetujui pengguna harus tetap tercatat.
+
+    Kalau salah satu hilang dari dokumen, berarti ada yang mengubah arah
+    rancangan tanpa persetujuan.
+    """
+    doc = ROOT / "docs" / "RANCANGAN-AKUN-CLUB-SINKRONISASI.md"
+    if not doc.is_file():
+        return False
+    teks = doc.read_text(encoding="utf-8", errors="replace")
+    wajib = {
+        "login diingat selamanya": "Diingat selamanya",
+        "satu club aktif": "Satu club aktif",
+        "hanya leader/co_leader yang unggah": "Hanya `leader` dan `co_leader`",
+        "full_name + nickname": "Keduanya disimpan",
+        "sesi bisa diklaim": "Bisa diklaim",
+        "member pending ditampilkan": "Ditampilkan",
+        "susunan menu 4": "Latihan · Quick Race · Member · Decoder",
+        "kualifikasi dihapus": "Kualifikasi** | dihapus",
+        "track pangkal data": "Track sebagai pangkal data",
+        "track_id wajib": "track_id`** sejak dibuat",
+    }
+    kurang = [k for k, v in wajib.items() if v not in teks]
+    if kurang:
+        print(f"  GAGAL    keputusan hilang dari rancangan: {', '.join(kurang)}")
+        return False
+    # nama peran harus sesuai website
+    for peran in ("`leader`", "`co_leader`", "`officer`", "`pending`"):
+        if peran not in teks:
+            print(f"  GAGAL    peran {peran} tidak disebut sesuai nama website")
+            return False
+    print(f"  ok       {len(wajib)} keputusan desain tercatat & peran sesuai website")
+    return True
+
+
+def check_ui_mockup() -> bool:
+    """Mockup UI harus ada, mandiri (tanpa CDN), dan tidak menambah menu.
+
+    Pratinjau di aplikasi berjalan di iframe tanpa jaringan: satu tautan ke CDN
+    saja membuat mockup tampil rusak. Dan menu wajib tetap tiga.
+    """
+    f = ROOT / "docs" / "ui-mockup-akun-club.html"
+    if not f.is_file():
+        print("  HILANG  docs/ui-mockup-akun-club.html")
+        return False
+    h = f.read_text(encoding="utf-8", errors="replace")
+    ok = True
+    for pola, alasan in (
+        (r'(?:src|href)\s*=\s*["\'](?:https?:)?//', "memuat berkas dari luar (CDN)"),
+        (r"<script[^>]+src=", "memuat skrip luar"),
+        (r"<link[^>]+stylesheet", "memuat CSS luar"),
+    ):
+        import re as _re
+        if _re.search(pola, h):
+            print(f"  GAGAL    mockup {alasan}")
+            ok = False
+
+    import re as _re
+    # Struktur menu yang disetujui pengguna (2026-11-04, revisi ke-2):
+    # Latihan · Quick Race · Member · Decoder. Kualifikasi dihapus.
+    tab = _re.findall(r'class="tab[^"]*"[^>]*data-view="([a-z]+)"', h)
+    if sorted(tab) != ["decoder", "latihan", "member", "quickrace"]:
+        print(f"  GAGAL    menu harus latihan/quickrace/member/decoder, ditemukan: {tab}")
+        ok = False
+    if "kualifikasi" in [t.lower() for t in tab]:
+        print("  GAGAL    menu Kualifikasi sudah dihapus, jangan dikembalikan")
+        ok = False
+    # Pemilih peran dihapus: yang membuka aplikasi dianggap leader
+    if _re.search(r'data-role\s*=', h):
+        print("  GAGAL    mockup masih punya pemilih peran (harus dihapus)")
+        ok = False
+    # Quick Race harus memuat lima bagian yang diminta pengguna
+    wajib_qr = {
+        "pemilih track": 'id="trackSel"',
+        "preset": 'class="presetbar"',
+        "menu preset": 'id="gearMenu"',
+        "leaderboard": "Pembalap / transponder",
+        "detail pembalap": 'id="dPembalap"' if 'id="dPembalap"' in h else 'id="dPanggil"',
+        "passing log": 'class="plog"',
+    }
+    kurang = [k for k, v in wajib_qr.items() if v not in h]
+    if kurang:
+        print(f"  GAGAL    Quick Race belum memuat: {', '.join(kurang)}")
+        ok = False
+    if ok:
+        print("  ok       mockup mandiri, menu 4, Quick Race lengkap (track/preset/board/passing)")
+    return ok
+
+
+def check_quickrace_app() -> bool:
+    """Aplikasi Quick Race (docs/quickrace-app.html) harus utuh & mandiri.
+
+    Ini mockup yang benar-benar berfungsi: countdown, timing, finish → simpan →
+    history, peserta dari member, dan menu track. Kalau salah satu bagian
+    hilang, artinya ada yang merusak alurnya.
+    """
+    import re as _re
+    f = ROOT / "docs" / "quickrace-app.html"
+    if not f.is_file():
+        print("  HILANG  docs/quickrace-app.html")
+        return False
+    h = f.read_text(encoding="utf-8", errors="replace")
+    ok = True
+    if _re.search(r'(?:src|href)\s*=\s*["\'](?:https?:)?//', h):
+        print("  GAGAL    quickrace-app memuat berkas dari luar (CDN)")
+        ok = False
+    bagian = {
+        "countdown": 'id="cdLayer"',
+        "pengaturan": 'id="modalSetting"',
+        "simpan race": 'id="modalSave"',
+        "history": 'id="view-history"',
+        "peserta": 'id="modalPeserta"',
+        "track": 'id="view-track"',
+        "km/h": "function kmh(",
+        "penyimpanan lokal": "localStorage",
+    }
+    kurang = [k for k, v in bagian.items() if v not in h]
+    if kurang:
+        print(f"  GAGAL    quickrace-app belum memuat: {', '.join(kurang)}")
+        ok = False
+    # km/h harus dari waktu lap, bukan pass_duration
+    if "kmh(t.width, p.durUs)" in h or "kmh(t.width, e.durUs)" in h:
+        print("  GAGAL    km/h masih memakai pass_duration (angkanya mustahil)")
+        ok = False
+    # emoji yang bisa tampil sebagai kotak di Windows lama
+    for ch in ("\U0001F465", "\u2691", "\u27F3"):
+        if ch in h:
+            print(f"  GAGAL    quickrace-app memakai emoji {ch!r} (bisa jadi kotak)")
+            ok = False
+    if ok:
+        print("  ok       quickrace-app lengkap (countdown/history/peserta/track) & km/h benar")
+    return ok
+
+
+def check_data_update_rules() -> bool:
+    """Aturan data saat update harus tertulis DAN tidak dilanggar installer.
+
+    Risiko nyata: pembaruan/uninstall menghapus %APPDATA%\YurLaps dan seluruh
+    hasil balapan pengguna ikut hilang.
+    """
+    doc = ROOT / "docs" / "RANCANGAN-AKUN-CLUB-SINKRONISASI.md"
+    ok = True
+    if not doc.is_file():
+        return False
+    teks = doc.read_text(encoding="utf-8", errors="replace")
+    wajib = ["user_version", "BEGIN IMMEDIATE", "ROLLBACK", "backup",
+             "Credential Manager", "ADD COLUMN"]
+    kurang = [k for k in wajib if k not in teks]
+    if kurang:
+        print(f"  GAGAL    aturan data/update belum membahas: {', '.join(kurang)}")
+        ok = False
+
+    iss = ROOT / "installer" / "stintlab.iss"
+    if iss.is_file():
+        t = iss.read_text(encoding="utf-8", errors="replace")
+        # tidak boleh ada DeleteDir ke folder data
+        for baris in t.splitlines():
+            b = baris.strip().lower()
+            if b.startswith("deletedir") and "appdata" in b.replace("{%appdata}", "appdata"):
+                print(f"  GAGAL    installer menghapus folder data: {baris.strip()}")
+                ok = False
+    if ok:
+        print("  ok       aturan data saat update tertulis & installer tidak menghapus data")
+    return ok
+
+
+def check_single_workflow() -> bool:
+    """Hanya boleh ada satu workflow build; jalur Windows 8 sudah dihapus.
+
+    Keputusan 2026-11: YurLaps untuk Windows 10+ saja. Job/jalur Windows 7/8/8.1
+    di CI dibuang supaya tidak ada build yang menjanjikan sesuatu yang tidak
+    bisa dijalankan Electron (Chromium butuh Windows 10+).
+    """
+    wd = ROOT / ".github" / "workflows"
+    files = sorted(p.name for p in wd.glob("*.yml"))
+    ok = True
+    if len(files) > 1:
+        print(f"  GAGAL    ada {len(files)} workflow: {', '.join(files)}")
+        print("           cukup satu: build-windows.yml")
+        ok = False
+    wf = wd / "build-windows.yml"
+    if not wf.is_file():
+        print("  GAGAL    build-windows.yml tidak ada")
+        return False
+    teks = wf.read_text(encoding="utf-8", errors="replace")
+    for kata in ("build-legacy-native", "YurLaps-Windows-Tk", "stintlab-win8"):
+        if kata in teks:
+            print(f"  GAGAL    build-windows.yml masih memuat '{kata}'")
+            ok = False
+    if ok:
+        print("  ok       satu workflow build, tanpa jalur Windows 8")
+    return ok
+
+
 def check_patch_lf() -> bool:
     """Patch harus LF dan .gitattributes melindunginya.
 
@@ -589,6 +803,12 @@ def main() -> int:
     ok = check_workflow_tools() and ok
     ok = check_no_external_imports() and ok
     ok = check_patch_lf() and ok
+    ok = check_single_workflow() and ok
+    ok = check_data_update_rules() and ok
+    ok = check_quickrace_app() and ok
+    ok = check_ui_mockup() and ok
+    ok = check_design_decisions() and ok
+    ok = check_design_doc() and ok
     ok = check_installer() and ok
     ok = check_nsis_hooks() and ok
     ok = check_installer_names() and ok

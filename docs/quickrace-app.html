@@ -1,0 +1,1838 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YurLaps — Quick Race</title>
+<style>
+  :root{
+    --blue:#009de0; --blue-l:#eaf6fe; --blue-xl:#f5fbff;
+    --ink:#0d2b45; --txt:#2a3a4d; --muted:#8a98aa; --muted2:#a9b5c3;
+    --line:#e7edf4; --line2:#f0f4f9; --bg:#f7f9fc;
+    --ok:#12b76a; --ok-l:#e8f8ef; --warn:#d99a2b; --warn-l:#fdf6e7;
+    --bad:#e8544c; --bad-l:#fdeeed;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font:14px/1.5 'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;
+    color:var(--txt);background:var(--bg);-webkit-font-smoothing:antialiased}
+  h1,h2,h3{margin:0;color:var(--ink)}
+  button{font:inherit;cursor:pointer;color:inherit;border:0;background:none}
+  input,select{font:inherit;color:inherit}
+  body.busy{overflow:hidden}
+
+  /* ---------- shell ---------- */
+  .app{display:flex;min-height:100vh}
+  aside{width:190px;background:#fff;border-right:1px solid var(--line2);
+    position:fixed;inset:0 auto 0 0;padding:26px 12px;display:flex;flex-direction:column;z-index:30}
+  .brand{margin:0 10px}
+  .brand .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:19px;color:var(--ink);letter-spacing:-.4px}
+  .brand .logo i{width:22px;height:22px;border-radius:6px;background:var(--blue);
+    display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,157,224,.35)}
+  .brand .logo i svg{width:13px;height:13px;stroke:#fff;fill:none;stroke-width:2.4}
+  .tag{margin:2px 11px 26px;font-size:8px;letter-spacing:1.5px;color:var(--muted2)}
+  .tab{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;
+    padding:11px 12px;border-radius:8px;color:#78879a;font-size:13px;font-weight:500;margin-bottom:2px;
+    text-align:left;white-space:nowrap}
+  .tab svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7}
+  .tab:hover{background:#f5f8fc}
+  .tab.on{background:var(--blue-l);color:var(--blue);font-weight:600}
+  .tab .n{display:none;margin-left:auto;background:var(--blue);color:#fff;font-size:9.5px;
+    font-weight:700;padding:1px 6px;border-radius:9px}
+  .tab .n.on{display:inline-block}
+  .aside-foot{margin-top:auto;font-size:10.5px;color:var(--muted2);padding:0 11px}
+  .aside-foot b{display:block;color:var(--muted);font-size:11px;font-weight:600;margin-bottom:2px}
+  .main{margin-left:190px;flex:1;min-width:0;padding:0 0 34px;max-width:1320px}
+
+  /* ---------- topbar ---------- */
+  .topbar{display:flex;align-items:center;gap:12px;padding:13px 28px;background:#fff;
+    border-bottom:1px solid var(--line2);position:sticky;top:0;z-index:20}
+  .topbar .where{font-size:13px;color:var(--muted)}
+  .topbar .where b{color:var(--ink)}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+    padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:#fff}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--muted2)}
+  .pill.online{color:#0b7a45;background:var(--ok-l);border-color:#c8eeda}
+  .pill.online .dot{background:var(--ok)}
+  .pill.offline{color:#8a6a12;background:var(--warn-l);border-color:#f2e2b8}
+  .pill.offline .dot{background:var(--warn)}
+  .account-btn{margin-left:auto;display:flex;align-items:center;gap:9px;padding:5px 12px 5px 6px;
+    border:1px solid var(--line);border-radius:999px;background:#fff}
+  .account-btn:hover{background:#f9fbfe;border-color:#d7e3f0}
+  .avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#009de0,#0b7a9e);
+    color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;
+    flex:none}
+  .account-btn .who{text-align:left;line-height:1.15}
+  .account-btn .who b{display:block;font-size:12.5px;color:var(--ink)}
+  .account-btn .who span{font-size:10.5px;color:var(--muted)}
+
+  /* ---------- umum ---------- */
+  .page{padding:20px 28px 0;max-width:1250px}
+  .head{display:flex;align-items:flex-end;gap:14px;margin-bottom:13px;flex-wrap:wrap}
+  .head h1{font-size:21px;letter-spacing:-.3px}
+  .head .lead{font-size:12.5px;color:var(--muted)}
+  .head .right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 14px;
+    border-radius:9px;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:#fff;
+    white-space:nowrap;transition:.12s}
+  .btn:hover{background:#f9fbfe;border-color:#d7e3f0}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(0,157,224,.28)}
+  .btn.primary:hover{background:#0089c6}
+  .btn.go{background:var(--ok);border-color:var(--ok);color:#fff;box-shadow:0 2px 8px rgba(18,183,106,.3)}
+  .btn.go:hover{background:#0da25d}
+  .btn.fin{background:var(--bad);border-color:var(--bad);color:#fff;box-shadow:0 2px 8px rgba(232,84,76,.28)}
+  .btn.fin:hover{background:#d3483f}
+  .btn.ghost{background:none;border-color:transparent;color:var(--muted)}
+  .btn.danger{color:var(--bad);border-color:#f3cfcc}
+  .btn.sm{padding:5px 10px;font-size:11.5px;border-radius:7px}
+  .btn.icon{padding:7px 9px}
+  .btn[disabled]{opacity:.45;cursor:not-allowed;transform:none}
+  .card{border:1px solid var(--line);border-radius:12px;background:#fff;padding:15px 17px;margin-bottom:13px}
+  .card h3{font-size:11.5px;text-transform:uppercase;letter-spacing:.45px;color:var(--muted);
+    font-weight:700;margin-bottom:9px}
+  .kv{display:flex;justify-content:space-between;gap:14px;padding:6px 0;font-size:12.5px;
+    border-bottom:1px solid var(--line2)}
+  .kv:last-child{border-bottom:0}
+  .kv span{color:var(--muted)}
+  .kv b{color:var(--ink);font-weight:600}
+  .note{font-size:11.5px;color:var(--muted);line-height:1.6}
+  .grid{display:grid;grid-template-columns:1.62fr 1fr;gap:15px;margin-top:13px}
+  .side-card{border:1px solid var(--line);border-radius:13px;background:#fff;padding:15px;margin-bottom:13px}
+  .side-card h3{font-size:11px;text-transform:uppercase;letter-spacing:.45px;color:var(--muted);
+    font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .side-card h3 span{margin-left:auto;font-size:10px;color:var(--muted2);text-transform:none;
+    letter-spacing:0;font-weight:500}
+  .empty{text-align:center;padding:26px 10px;color:var(--muted)}
+  .empty b{display:block;color:var(--ink);font-size:14px;margin-bottom:4px}
+
+  /* ---------- track + preset bar ---------- */
+  .barrow{display:flex;align-items:center;gap:13px;background:#fff;border:1px solid var(--line);
+    border-radius:12px;padding:11px 15px;margin-bottom:11px;flex-wrap:wrap}
+  .barrow.track{border-color:#d9eefb}
+  .barrow .lbl{min-width:88px}
+  .barrow .lbl b{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;
+    color:var(--muted2);font-weight:700}
+  .barrow .lbl span{font-size:11.5px;color:var(--muted)}
+  .barrow select{border:1px solid var(--line);border-radius:8px;padding:8px 11px;background:#fbfdff;
+    font-size:12.5px;font-weight:600;color:var(--ink);min-width:200px}
+  .barrow select[disabled]{background:#f4f7fa;color:var(--muted2)}
+  .barrow .sep{width:1px;height:32px;background:var(--line)}
+  .barrow .meta{margin-left:auto;text-align:right}
+  .barrow .meta b{display:block;font-size:12.5px;color:var(--ink)}
+  .barrow .meta span{font-size:10.5px;color:var(--muted)}
+  .dirty{font-size:10px;font-weight:700;color:#8a6a12;background:var(--warn-l);
+    border:1px solid #f2e2b8;border-radius:5px;padding:3px 7px}
+  .dirty.ok{color:#0b7a45;background:var(--ok-l);border-color:#c8eeda}
+  .barrow .acts{margin-left:auto;display:flex;gap:7px;align-items:center}
+  .gear{position:relative}
+  .menu{position:absolute;right:0;top:34px;background:#fff;border:1px solid var(--line);
+    border-radius:10px;box-shadow:0 12px 30px rgba(13,43,69,.14);padding:5px;min-width:178px;z-index:25}
+  .menu[hidden]{display:none}
+  .menu button{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:7px;font-size:12.5px}
+  .menu button:hover{background:#f5f8fc}
+  .menu button.del{color:var(--bad)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .chip{font-size:11px;font-weight:600;color:#37586f;background:#fff;border:1px solid var(--line);
+    border-radius:7px;padding:4px 9px}
+  .chip b{color:var(--ink)}
+  .chip.warn{color:#8a6a12;background:var(--warn-l);border-color:#f2e2b8}
+
+  /* ---------- papan skor ---------- */
+  .big{border:1px solid var(--line);border-radius:13px;background:#fff;overflow:hidden}
+  .big-bar{display:flex;align-items:center;gap:10px;padding:11px 15px;border-bottom:1px solid var(--line2);
+    font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .big-bar .live{display:inline-flex;align-items:center;gap:6px;color:#0b7a45;font-weight:700;font-size:11px}
+  .big-bar .live i{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(18,183,106,.18)}
+  .big-bar .live.idle{color:var(--muted2)} .big-bar .live.idle i{background:var(--muted2);box-shadow:none}
+  .big-bar .clock{margin-left:auto;font-family:'Cascadia Mono',Consolas,monospace;
+    font-size:15px;font-weight:700;color:var(--ink);letter-spacing:.5px}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted2);text-align:left;
+    padding:8px 11px;border-bottom:1px solid var(--line2);font-weight:700;white-space:nowrap}
+  th.r,td.r{text-align:right}
+  td{padding:9px 11px;border-bottom:1px solid var(--line2);font-size:12.5px}
+  tr:last-child td{border-bottom:0}
+  tbody tr.row{cursor:pointer}
+  tbody tr.row:hover{background:#f7fbff}
+  tbody tr.row.sel{background:var(--blue-xl);box-shadow:inset 3px 0 0 var(--blue)}
+  td.pos{color:var(--muted2);font-weight:800;width:30px}
+  td.pos.first{color:var(--blue)}
+  td.nm{color:var(--ink);font-weight:600}
+  #hist th:nth-child(1),#hist td:nth-child(1){min-width:168px}
+  #hist th:nth-child(2),#hist td:nth-child(2){min-width:176px}
+  #hist td:nth-child(1){white-space:nowrap}
+  td.nm small{display:block;font-weight:400;font-size:10px;color:var(--muted2)}
+  .mono{font-family:'Cascadia Mono',Consolas,monospace}
+  td.best{font-family:'Cascadia Mono',Consolas,monospace;font-weight:700;color:var(--blue)}
+  td.num{font-family:'Cascadia Mono',Consolas,monospace;color:var(--txt)}
+  td.sig{font-family:'Cascadia Mono',Consolas,monospace;color:var(--muted);font-size:11px}
+  .outside{font-size:9px;font-weight:700;color:var(--warn);background:var(--warn-l);
+    padding:2px 5px;border-radius:4px;margin-left:5px}
+  .st-live{font-size:9.5px;font-weight:700;color:#0b7a45;background:var(--ok-l);padding:2px 6px;border-radius:5px}
+  .st-run{font-size:9.5px;font-weight:700;color:var(--blue);background:var(--blue-l);padding:2px 6px;border-radius:5px}
+  .st-out{font-size:9.5px;font-weight:700;color:#6c7c8e;background:#f1f4f8;padding:2px 6px;border-radius:5px}
+
+  /* ---------- detail driver + passing ---------- */
+  .dhead{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+  .dhead .avatar{width:34px;height:34px;font-size:13px}
+  .dhead .who b{display:block;font-size:14px;color:var(--ink)}
+  .dhead .who span{font-size:11px;color:var(--muted)}
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .metric{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fcfdff}
+  .metric span{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;
+    color:var(--muted2);font-weight:700}
+  .metric b{font-size:15px;color:var(--ink);font-family:'Cascadia Mono',Consolas,monospace}
+  .metric b.best{color:var(--blue)}
+  .laps{max-height:138px;overflow:auto;border-top:1px solid var(--line2);margin-top:3px}
+  .lap{display:flex;align-items:center;gap:9px;padding:5px 0;border-bottom:1px solid var(--line2);font-size:11.5px}
+  .lap:last-child{border-bottom:0}
+  .lap .n{width:36px;color:var(--muted2);font-weight:700}
+  .lap .t{font-family:'Cascadia Mono',Consolas,monospace;color:var(--ink)}
+  .lap .v{margin-left:auto;font-size:10px;color:var(--muted);font-family:'Cascadia Mono',Consolas,monospace}
+  .lap .d{font-size:10px;font-family:'Cascadia Mono',Consolas,monospace;width:52px;text-align:right}
+  .lap .d.up{color:var(--ok)} .lap .d.down{color:var(--bad)}
+  .plog{max-height:200px;overflow:auto}
+  .prow{display:grid;grid-template-columns:50px 1fr 42px 42px;gap:8px;align-items:center;
+    padding:6px 0;border-bottom:1px solid var(--line2);font-size:11.5px}
+  .prow:last-child{border-bottom:0}
+  .prow .tm{font-family:'Cascadia Mono',Consolas,monospace;color:var(--muted);font-size:10.5px}
+  .prow .nm{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prow .nm small{display:block;font-weight:400;font-size:9.5px;color:var(--muted2)}
+  .prow .rs{font-family:'Cascadia Mono',Consolas,monospace;color:var(--muted);font-size:10.5px;text-align:right}
+  .prow .lp{font-family:'Cascadia Mono',Consolas,monospace;color:var(--blue);font-size:10.5px;font-weight:700;text-align:right}
+  .prow.skip .nm{color:var(--muted2);font-weight:400}
+  .prow.skip .lp{color:var(--warn);font-weight:600}
+  .footerbar{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--muted);flex-wrap:wrap}
+  .footerbar b{color:var(--ink)}
+
+  /* ---------- modal ---------- */
+  .modal{position:fixed;inset:0;background:rgba(13,43,69,.34);z-index:60;display:grid;place-items:center;padding:22px}
+  .modal[hidden]{display:none}
+  .dlg{width:520px;max-width:100%;max-height:88vh;overflow:auto;background:#fff;border-radius:14px;
+    padding:22px;box-shadow:0 22px 70px rgba(13,43,69,.28)}
+  .dlg.wide{width:760px}
+  .dlg h2{font-size:17px;margin-bottom:3px}
+  .dlg .sub{font-size:11.5px;color:var(--muted);margin-bottom:16px}
+  .dlg .foot{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
+  .field{margin-bottom:11px}
+  .field label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+    color:var(--muted2);font-weight:700;margin-bottom:5px}
+  .field input,.field select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 11px;
+    font-size:12.5px;background:#fbfdff}
+  .field input:focus,.field select:focus{outline:0;border-color:var(--blue);background:#fff}
+  .field .hint{font-size:10.5px;color:var(--muted);margin-top:4px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .chipsel{display:flex;gap:6px;flex-wrap:wrap}
+  .chipsel button{border:1px solid var(--line);background:#fbfdff;border-radius:8px;padding:7px 12px;
+    font-size:12px;font-weight:600;color:var(--muted)}
+  .chipsel button.on{background:var(--blue-l);border-color:#bfe6f7;color:var(--blue)}
+
+  /* peserta */
+  .rrow{display:grid;grid-template-columns:26px 1fr 88px 74px 108px;gap:9px;align-items:center;
+    padding:7px 6px;border-bottom:1px solid var(--line2);font-size:12.5px}
+  .rrow:hover{background:#f9fcff}
+  .rrow.on{background:var(--blue-xl)}
+  .rrow input[type=checkbox]{width:15px;height:15px;accent-color:var(--blue)}
+  .rrow .nm b{color:var(--ink)}
+  .rrow .nm small{display:block;font-size:10px;color:var(--muted)}
+  .rrow input[type=text],.rrow input[type=number]{width:100%;border:1px solid var(--line);
+    border-radius:6px;padding:5px 7px;font-size:11.5px;background:#fff}
+  .rrow input[type=number]{font-family:'Cascadia Mono',Consolas,monospace}
+  .roster-head{display:grid;grid-template-columns:26px 1fr 88px 74px 108px;gap:9px;padding:0 6px 6px;
+    font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted2);font-weight:700;
+    border-bottom:1px solid var(--line)}
+  .rsearch{display:flex;gap:8px;margin-bottom:9px}
+  .rsearch input{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12px;background:#fbfdff}
+  .rlist{max-height:330px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:0 8px}
+
+  /* countdown */
+  .cd{position:fixed;inset:0;z-index:80;display:grid;place-items:center;
+    background:radial-gradient(circle at 50% 45%,#0f3a58 0%,#0a2438 70%);color:#fff}
+  .cd[hidden]{display:none}
+  .cd .n{font-size:170px;font-weight:800;line-height:1;letter-spacing:-6px;
+    font-family:'Segoe UI',system-ui,sans-serif;
+    text-shadow:0 0 70px rgba(0,157,224,.55);animation:pop .9s ease-out}
+  .cd .n.go{color:#31d98a;text-shadow:0 0 70px rgba(49,217,138,.6)}
+  .cd .cap{margin-top:14px;font-size:13px;letter-spacing:3px;text-transform:uppercase;
+    color:#8fb6cf;text-align:center}
+  .cd .who{margin-top:22px;font-size:15px;color:#eaf7fe;text-align:center;font-weight:600}
+  @keyframes pop{0%{transform:scale(.6);opacity:0}35%{transform:scale(1.06);opacity:1}100%{transform:scale(1)}}
+
+  /* speed */
+  .spd{font-family:'Cascadia Mono',Consolas,monospace;font-size:11.5px;color:#37586f;white-space:nowrap}
+  .spd b{color:var(--blue)}
+
+  /* toast */
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:90;background:#0d2b45;
+    color:#fff;font-size:12px;padding:9px 16px;border-radius:9px;box-shadow:0 8px 24px rgba(13,43,69,.3);
+    opacity:0;transition:opacity .22s,transform .22s}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(-4px)}
+
+  /* ---------- member / decoder / track ---------- */
+  .member{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--line2)}
+  .member:last-child{border-bottom:0}
+  .member .avatar{width:30px;height:30px;font-size:11.5px}
+  .member .who{min-width:0;flex:1}
+  .member .who b{display:block;font-size:12.5px;color:var(--ink)}
+  .member .who span{font-size:10.5px;color:var(--muted)}
+  .member .tps{text-align:right;font-size:10px;color:var(--muted)}
+  .role{font-size:9.5px;font-weight:700;letter-spacing:.3px;padding:2px 6px;border-radius:5px;
+    text-transform:uppercase;white-space:nowrap}
+  .role.leader{background:#e8f1fe;color:#1b64c9}
+  .role.co_leader{background:#eaf6fe;color:#0b7fa8}
+  .role.officer{background:#f2eefc;color:#6b48c8}
+  .role.member{background:#f1f4f8;color:#6c7c8e}
+  .st-p{font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:5px}
+  .st-p.active{background:var(--ok-l);color:#0b7a45}
+  .st-p.pending{background:var(--warn-l);color:#8a6a12}
+  .tp{font-size:10px;font-family:'Cascadia Mono',Consolas,monospace;color:var(--txt);
+    background:#f6f9fc;border:1px solid var(--line);padding:1px 5px;border-radius:4px;
+    display:inline-block;margin:1px 2px 0 0}
+  .search{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;
+    padding:8px 12px;background:#fff;margin-bottom:13px;color:var(--muted2);font-size:12px}
+  .search input{border:0;outline:0;flex:1;background:none;font-size:12px}
+  .led{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#0b7a45}
+  .led i{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(18,183,106,.18)}
+  .stat{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-bottom:13px}
+  .stat .cell{border:1px solid var(--line);border-radius:11px;background:#fff;padding:12px 14px}
+  .stat .cell span{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;
+    color:var(--muted2);font-weight:700}
+  .stat .cell b{font-size:16px;color:var(--ink);font-weight:700;font-family:'Cascadia Mono',Consolas,monospace}
+  .trackrow{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--line2)}
+  .trackrow:last-child{border-bottom:0}
+  .trackrow .ico{width:32px;height:32px;border-radius:9px;background:var(--blue-l);
+    display:flex;align-items:center;justify-content:center;flex:none}
+  .trackrow .ico svg{width:16px;height:16px;stroke:var(--blue);fill:none;stroke-width:1.8}
+  .trackrow .who{flex:1;min-width:0}
+  .trackrow .who b{display:block;font-size:12.5px;color:var(--ink)}
+  .trackrow .who span{font-size:10.5px;color:var(--muted)}
+  .trackrow .rec{text-align:right;font-size:10.5px;color:var(--muted)}
+  .trackrow .rec b{display:block;font-family:'Cascadia Mono',Consolas,monospace;font-size:12px;color:var(--blue)}
+  .trackrow .act{display:flex;gap:5px;margin-left:8px}
+  .badge-sync{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px}
+  .badge-sync.ya{background:var(--ok-l);color:#0b7a45}
+  .badge-sync.belum{background:var(--warn-l);color:#8a6a12}
+
+  @media (max-width:1000px){
+    .grid{grid-template-columns:1fr} aside{display:none} .main{margin-left:0}
+    .stat{grid-template-columns:repeat(2,1fr)}
+    .rrow,.roster-head{grid-template-columns:24px 1fr 70px 60px 92px;font-size:11.5px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ==================== COUNTDOWN ==================== -->
+<div class="cd" id="cdLayer" hidden>
+  <div>
+    <div class="n" id="cdNum">5</div>
+    <div class="cap" id="cdCap">Bersiap</div>
+    <div class="who" id="cdWho"></div>
+  </div>
+</div>
+
+<div class="app">
+  <aside>
+    <div class="brand"><div class="logo"><i><svg viewBox="0 0 24 24"><path d="M5 19l7-14 7 14"/></svg></i>YurLaps</div></div>
+    <div class="tag">RC TIMING SYSTEM</div>
+
+    <button class="tab on" data-view="quickrace">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 21V4l7 4 7-4v11l-7 4-7-2z"/></svg> Quick Race
+    </button>
+    <button class="tab" data-view="history">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> History Race
+      <span class="n" id="histBadge">0</span>
+    </button>
+    <button class="tab" data-view="member">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 11h5M18.5 8.5v5"/></svg> Member
+    </button>
+    <button class="tab" data-view="track">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 5c-4 0-4 14 0 14h4c4 0 2-6 6-6h3c5 0 5-8 0-8z"/></svg> Track
+    </button>
+    <button class="tab" data-view="decoder">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 13a8 8 0 0116 0"/><path d="M7 17a4.5 4.5 0 019 0"/><circle cx="13" cy="20" r="1.4"/></svg> Decoder
+    </button>
+
+    <div class="aside-foot">
+      <b>YurLaps Decoder</b>
+      <span id="asideDec">aktif · menunggu lintasan</span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="where">Club: <b>Medan RC</b> · Track: <b id="topTrack">—</b></div>
+      <span class="pill offline" id="pill"><span class="dot"></span><span id="pilltxt">Offline — 0 sesi belum diunggah</span></span>
+      <button class="account-btn" onclick="toast('Panel akun (mockup)')">
+        <span class="avatar">BS</span>
+        <span class="who"><b>Budi</b><span>leader · Medan RC</span></span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a98aa" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </div>
+
+    <!-- ==================== QUICK RACE ==================== -->
+    <div class="page" id="view-quickrace">
+      <div class="head">
+        <div><h1>Quick Race</h1>
+          <div class="lead" id="qrLead">Pilih track, pilih peserta, lalu Mulai.</div></div>
+        <div class="right">
+          <button class="btn" id="btnPeserta"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" style="margin-right:1px"><circle cx="8" cy="8" r="3"/><path d="M2 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 11h5M18.5 8.5v5"/></svg> Peserta <span id="nPeserta" class="mono" style="color:var(--blue)">0</span></button>
+          <button class="btn icon" id="btnSetting" title="Pengaturan Quick Race"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></svg></button>
+          <button class="btn" id="btnReset"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg> Reset</button>
+          <button class="btn go" id="btnStart"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l12 7-12 7z"/></svg> Start</button>
+          <button class="btn fin" id="btnFinish" disabled><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 21V4l6 3 6-3v10l-6 3-6-2"/><path d="M6 21h-.5"/></svg> Finish</button>
+        </div>
+      </div>
+
+      <!-- track + preset -->
+      <div class="barrow track">
+        <div class="lbl"><b>Track</b><span id="trackSrc">dari club</span></div>
+        <select id="selTrack"></select>
+        <div class="sep"></div>
+        <div class="lbl"><b>Preset</b><span>pengaturan sesi</span></div>
+        <select id="selPreset"></select>
+        <div class="meta" id="trackMeta"></div>
+      </div>
+
+      <div class="barrow">
+        <div class="lbl"><b>Preset aktif</b><span id="presetName">—</span></div>
+        <span class="dirty ok" id="presetState">tersimpan</span>
+        <div class="acts">
+          <button class="btn sm" id="btnApply">Terapkan</button>
+          <button class="btn sm" id="btnSaveAs">Simpan sebagai</button>
+          <div class="gear">
+            <button class="btn sm icon" id="gearBtn" title="Menu preset">⚙</button>
+            <div class="menu" id="gearMenu" hidden>
+              <button id="mEdit">⚙ Edit preset</button>
+              <button id="mDup">⧉ Duplikat preset</button>
+              <button id="mNew">+ Preset baru</button>
+              <button class="del" id="mDel">× Hapus preset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chips" id="chips"></div>
+
+      <div class="grid">
+        <div>
+          <div class="big">
+            <div class="big-bar">
+              <span class="live idle" id="liveTag"><i></i>SIAP</span>
+              <span id="qrTitle">Quick Race</span>
+              <span class="clock" id="qrClock">00:00.0</span>
+            </div>
+            <div id="boardWrap">
+              <div class="empty" id="boardEmpty">
+                <b>Belum ada peserta</b>
+                Tekan <b style="display:inline">Peserta</b> di kanan atas untuk memilih pembalap dari member club.
+              </div>
+              <table id="board" style="display:none">
+                <thead><tr>
+                  <th></th><th>Pembalap / transponder</th>
+                  <th class="r">Lap</th><th class="r">Terakhir</th><th class="r">Terbaik</th>
+                  <th class="r">Rata²</th><th class="r">σ</th><th class="r">km/h</th><th class="r">Status</th>
+                </tr></thead>
+                <tbody id="boardBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="footerbar">
+            Data melekat pada <b id="footTrack">—</b>. Ubah track hanya saat sesi belum berjalan.
+          </div>
+        </div>
+
+        <div>
+          <div class="side-card" id="detailCard" hidden>
+            <h3>Detail pembalap <span id="dNama"></span></h3>
+            <div class="dhead">
+              <span class="avatar" id="dAv">?</span>
+              <span class="who"><b id="dPanggil">—</b><span id="dLengkap">—</span></span>
+            </div>
+            <div class="metrics">
+              <div class="metric"><span>Best lap</span><b class="best" id="dBest">—</b></div>
+              <div class="metric"><span>Rata-rata</span><b id="dAvg">—</b></div>
+              <div class="metric"><span>Konsistensi σ</span><b id="dSig">—</b></div>
+              <div class="metric"><span>Jumlah lap</span><b id="dLaps">0</b></div>
+            </div>
+            <svg viewBox="0 0 240 46" width="100%" height="46" style="display:block;margin:2px 0 4px">
+              <polyline fill="none" stroke="#e7edf4" stroke-width="1" points="0,16 240,16"/>
+              <polyline id="dGraph" fill="none" stroke="#009de0" stroke-width="2" stroke-linejoin="round" points=""/>
+            </svg>
+            <div class="note" style="margin-bottom:6px">Waktu per lap</div>
+            <div class="laps" id="dLapList"></div>
+          </div>
+
+          <div class="side-card">
+            <h3>Passing log <span id="pLogN">0 lintasan</span></h3>
+            <div class="plog" id="pLog">
+              <div class="note" id="pLogEmpty">Belum ada lintasan. Tekan Start, lalu pembalap melewati garis.</div>
+            </div>
+            <div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap">
+              <button class="btn sm" id="btnClearLog">Bersihkan log</button>
+              <button class="btn sm" id="btnSimPass">+ Lintasan (simulasi)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== HISTORY RACE ==================== -->
+    <div class="page" id="view-history" style="display:none">
+      <div class="head">
+        <div><h1>History Race</h1>
+          <div class="lead">Sesi yang sudah disimpan. Bisa diunggah, dibuka kembali, atau dihapus.</div></div>
+        <div class="right">
+          <select id="histFilter" style="border:1px solid var(--line);border-radius:9px;padding:8px 11px;font-size:12.5px;background:#fff"></select>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="big">
+          <div class="big-bar"><span>Sesi tersimpan</span><span style="margin-left:auto" id="histCount">0 sesi</span></div>
+          <div id="histWrap"><div class="empty" id="histEmpty"><b>Belum ada sesi tersimpan</b>
+            Jalankan Quick Race, tekan Finish, lalu simpan.</div></div>
+          <table id="hist" style="display:none">
+            <thead><tr><th>Sesi</th><th>Track</th><th class="r">Peserta</th><th class="r">Lap</th>
+              <th class="r">Best</th><th class="r">Waktu</th><th class="r">Status</th><th></th></tr></thead>
+            <tbody id="histBody"></tbody>
+          </table>
+        </div>
+        <div>
+          <div class="side-card">
+            <h3>Ringkasan <span id="histRekap"></span></h3>
+            <div class="kv"><span>Total sesi</span><b id="rTotal">0</b></div>
+            <div class="kv"><span>Belum diunggah</span><b id="rBelum" style="color:#8a6a12">0</b></div>
+            <div class="kv"><span>Sudah diunggah</span><b id="rSent" style="color:#0b7a45">0</b></div>
+            <div class="kv"><span>Total lap tercatat</span><b id="rLap">0</b></div>
+            <div class="note" style="margin-top:9px">Unggahan hanya lewat tombol — tidak ada pengiriman otomatis.</div>
+          </div>
+          <div class="side-card">
+            <h3>Sesi terpilih <span id="histSel">—</span></h3>
+            <div id="histDetail"><div class="note">Klik satu sesi untuk melihat rincian per pembalap.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== MEMBER ==================== -->
+    <div class="page" id="view-member" style="display:none">
+      <div class="head">
+        <div><h1>Member</h1>
+          <div class="lead">Dibaca dari yurlaps.dpdns.org — hanya lihat, diubah dari website.</div></div>
+      </div>
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="memberSearch" placeholder="Cari nama atau nomor transponder…">
+      </div>
+      <div class="grid">
+        <div class="big">
+          <div class="big-bar"><span>Medan RC</span><span style="margin-left:auto" id="memberCount"></span></div>
+          <div id="memberList" style="padding:0 15px"></div>
+        </div>
+        <div>
+          <div class="side-card">
+            <h3>Ringkasan</h3>
+            <div class="kv"><span>Member aktif</span><b id="mActive">0</b></div>
+            <div class="kv"><span>Menunggu</span><b id="mPending" style="color:#8a6a12">0</b></div>
+            <div class="kv"><span>Transponder</span><b id="mTp">0</b></div>
+            <div class="kv"><span>Track</span><b id="mTrack">0</b></div>
+          </div>
+          <div class="side-card">
+            <h3>Catatan</h3>
+            <div class="note">Member <b>menunggu</b> tetap tampil, tetapi transpondernya belum dipakai untuk pemetaan otomatis.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TRACK ==================== -->
+    <div class="page" id="view-track" style="display:none">
+      <div class="head">
+        <div><h1>Track</h1>
+          <div class="lead">Track milik club ini. Perubahan disinkronkan ke website.</div></div>
+        <div class="right">
+          <button class="btn" id="btnTrackSync"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg> Sinkronkan ke web</button>
+          <button class="btn primary" id="btnTrackAdd">+ Tambah track</button>
+        </div>
+      </div>
+
+      <div class="chips" style="margin-bottom:12px">
+        <span class="chip" id="chipTrackN">0 track</span>
+        <span class="chip warn" id="chipTrackSync">0 belum disinkronkan</span>
+        <span class="chip">km/h = lebar loop ÷ waktu lintasan</span>
+      </div>
+
+      <div class="grid">
+        <div class="big">
+          <div class="big-bar"><span>Daftar track</span><span style="margin-left:auto">lebar loop dipakai untuk km/h</span></div>
+          <div id="trackWrap" style="padding:0 15px"></div>
+        </div>
+        <div>
+          <div class="side-card">
+            <h3>Contoh perhitungan</h3>
+            <div class="kv"><span>Lebar loop (keliling)</span><b>42 m</b></div>
+            <div class="kv"><span>Waktu satu lap</span><b>9.412 s</b></div>
+            <div class="kv"><span>Kecepatan</span><b style="color:var(--blue)">16 km/h</b></div>
+            <div class="note" style="margin-top:9px">
+              km/h = keliling loop ÷ waktu lap × 3,6. Contoh di atas: 42 m ÷ 9,412 s = 16 km/h.
+            </div>
+            <div class="note" style="margin-top:7px;color:#8a6a12">
+              Jangan memakai <span class="mono">pass_duration</span> (≈0,1 s) sebagai pembagi:
+              hasilnya 1.500 km/h — mustahil, karena itu waktu mobil di bawah antena,
+              bukan waktu menempuh satu loop.
+            </div>
+          </div>
+          <div class="side-card">
+            <h3>Catatan</h3>
+            <div class="note">Track tanpa lebar loop tetap bisa dipakai balapan — hanya kolom km/h yang kosong.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== DECODER ==================== -->
+    <div class="page" id="view-decoder" style="display:none">
+      <div class="head">
+        <div><h1>Decoder</h1><div class="lead">Status penerima dan pengaturan gain.</div></div>
+        <div class="right">
+          <button class="btn" id="btnDecStop">Stop</button>
+          <button class="btn primary" id="btnDecStart">Mulai ulang</button>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="cell"><span>Status</span><b style="font-size:13px"><span class="led" id="decLed"><i></i>aktif</span></b></div>
+        <div class="cell"><span>Endpoint</span><b>tcp://*:5556</b></div>
+        <div class="cell"><span>Gain</span><b id="decGain">1.41</b></div>
+        <div class="cell"><span>Lintasan / menit</span><b id="decRate">0</b></div>
+      </div>
+      <div class="grid">
+        <div class="big">
+          <div class="big-bar"><span>Lintasan terakhir</span><span style="margin-left:auto" id="decLogN">0</span></div>
+          <table><thead><tr><th>Transponder</th><th>Pembalap</th>
+            <th class="r">RSSI</th><th class="r">Durasi</th><th class="r">km/h</th><th class="r">Waktu</th></tr></thead>
+            <tbody id="decLogBody"></tbody></table>
+        </div>
+        <div>
+          <div class="side-card"><h3>Perangkat</h3>
+            <div class="kv"><span>Decoder</span><b>YurLaps Decoder</b></div>
+            <div class="kv"><span>Versi</span><b>OpenStint v260830.1</b></div>
+            <div class="kv"><span>Mode</span><b>RTL-SDR</b></div>
+            <div class="kv"><span>Frekuensi</span><b>900 MHz</b></div></div>
+          <div class="side-card"><h3>Ambang lintasan</h3>
+            <div class="kv"><span>Hit minimum</span><b>16</b></div>
+            <div class="kv"><span>Ambang RSSI</span><b>max − 6 dB</b></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: PESERTA ==================== -->
+<div class="modal" id="modalPeserta" hidden>
+  <div class="dlg wide">
+    <h2>Peserta Quick Race</h2>
+    <div class="sub">Pilih pembalap dari member club. Transponder terisi otomatis — bisa diubah kalau memakai transponder lain.</div>
+    <div class="rsearch">
+      <input id="rSearch" placeholder="Cari nama, nick, atau transponder…">
+      <button class="btn sm" id="rAll">Pilih semua</button>
+      <button class="btn sm" id="rNone">Kosongkan</button>
+    </div>
+    <div class="rlist">
+      <div class="roster-head"><span></span><span>Driver</span><span>No.</span><span>Kelas</span><span>Transponder</span></div>
+      <div id="rRows"></div>
+    </div>
+    <div class="foot">
+      <span class="note" style="margin-right:auto" id="rInfo">0 dipilih</span>
+      <button class="btn" id="rCancel">Batal</button>
+      <button class="btn primary" id="rSave">Simpan peserta</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: PENGATURAN ==================== -->
+<div class="modal" id="modalSetting" hidden>
+  <div class="dlg">
+    <h2>Pengaturan Quick Race</h2>
+    <div class="sub">Nama sesi, target, urutan, dan cara mulai.</div>
+
+    <div class="field"><label>Nama sesi</label>
+      <input id="setName" placeholder="Quick Race"></div>
+
+    <div class="two">
+      <div class="field"><label>Target</label>
+        <div class="chipsel" id="setTarget">
+          <button data-v="time">Waktu</button><button data-v="laps">Jumlah lap</button>
+        </div></div>
+      <div class="field"><label id="setTargetLbl">Durasi</label>
+        <select id="setValue"></select></div>
+    </div>
+
+    <div class="two">
+      <div class="field"><label>Urutan klasemen</label>
+        <select id="setRank">
+          <option value="lapsTime">Lap → total waktu</option>
+          <option value="best">Best lap → lap tercepat</option>
+          <option value="top3">Rata-rata 3 lap tercepat</option>
+          <option value="consecutive">3 lap berurutan tercepat</option>
+        </select></div>
+      <div class="field"><label>Cara mulai</label>
+        <select id="setStart">
+          <option value="grid">Grid bersamaan</option>
+          <option value="staggered">Bergiliran (staggered)</option>
+        </select></div>
+    </div>
+
+    <div class="two">
+      <div class="field"><label>Hitung mundur</label>
+        <select id="setCd"><option value="3">3 detik</option><option value="5" selected>5 detik</option>
+          <option value="10">10 detik</option></select></div>
+      <div class="field"><label>Bunyi</label>
+        <div class="chipsel" id="setSound"><button data-v="1" class="on">Aktif</button><button data-v="0">Mati</button></div></div>
+    </div>
+
+    <div class="field" style="margin-bottom:0">
+      <label>Preset</label>
+      <div class="note">Simpan pengaturan sebagai preset supaya bisa dipakai lagi: <b>Simpan sebagai</b>.</div>
+    </div>
+
+    <div class="foot">
+      <button class="btn" id="setCancel">Batal</button>
+      <button class="btn primary" id="setSave">Terapkan pengaturan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: SIMPAN RACE ==================== -->
+<div class="modal" id="modalSave" hidden>
+  <div class="dlg">
+    <h2>Simpan race?</h2>
+    <div class="sub" id="saveSub">Sesi akan masuk ke History Race dan bisa diunggah ke website.</div>
+    <div class="field"><label>Nama sesi</label><input id="saveName"></div>
+    <div class="two">
+      <div class="field"><label>Track</label><div id="saveTrack" class="mono" style="padding:9px 0;font-size:12.5px;color:var(--ink)"></div></div>
+      <div class="field"><label>Ringkasan</label><div id="saveSum" class="note" style="padding-top:9px"></div></div>
+    </div>
+    <div class="field" style="margin-bottom:0"><label>Hasil</label>
+      <div id="saveTop3" class="note"></div></div>
+    <div class="foot">
+      <button class="btn" id="saveCancel">Batal</button>
+      <button class="btn danger" id="saveDrop">Buang sesi</button>
+      <button class="btn primary" id="saveOk">Simpan ke History</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: TRACK ==================== -->
+<div class="modal" id="modalTrack" hidden>
+  <div class="dlg">
+    <h2 id="trkTitle">Tambah track</h2>
+    <div class="sub">Track melekat pada club dan disinkronkan ke website.</div>
+    <div class="field"><label>Nama track</label>
+      <input id="trkName" placeholder="Contoh: Sirkuit Medan RC · Layout C"></div>
+    <div class="field"><label>Alamat / lokasi</label>
+      <input id="trkAddr" placeholder="Contoh: Jl. Gatot Subroto, Medan"></div>
+    <div class="two">
+      <div class="field"><label>Lebar loop (meter)</label>
+        <input id="trkWidth" type="number" step="0.1" min="0" placeholder="42">
+        <div class="hint">Dipakai menghitung km/h dari waktu lintasan decoder.</div></div>
+      <div class="field"><label>Catatan layout</label>
+        <input id="trkNote" placeholder="4 tikungan, aspal"></div>
+    </div>
+    <div class="field" style="margin-bottom:0">
+      <label>Perkiraan</label>
+      <div class="note" id="trkHitung">Isi lebar loop untuk melihat contoh kecepatan.</div>
+    </div>
+    <div class="foot">
+      <button class="btn" id="trkCancel">Batal</button>
+      <button class="btn primary" id="trkSave">Simpan track</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL: DETAIL SESI ==================== -->
+<div class="modal" id="modalSesi" hidden>
+  <div class="dlg wide">
+    <h2 id="sesiTitle">Sesi</h2>
+    <div class="sub" id="sesiSub"></div>
+    <div id="sesiBody"></div>
+    <div class="foot">
+      <button class="btn" id="sesiClose">Tutup</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================================
+   YurLaps — Quick Race (mockup berfungsi)
+   Bagian: data → format → sesi → render → aksi → modal
+   ========================================================================== */
+(function(){
+'use strict';
+
+const $ = id => document.getElementById(id);
+const SVG_PLAY = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l12 7-12 7z"/></svg>';
+const el = (t, cls, html) => { const e = document.createElement(t); if(cls) e.className = cls;
+  if(html != null) e.innerHTML = html; return e; };
+const pad = n => String(n).padStart(2,'0');
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- format ---------- */
+function fmtLap(ms){
+  if(ms == null || !isFinite(ms) || ms <= 0) return '—';
+  return (ms/1000).toFixed(3);
+}
+function fmtClock(ms){
+  if(ms < 0) ms = 0;
+  const m = Math.floor(ms/60000), s = Math.floor(ms%60000/1000), d = Math.floor(ms%1000/100);
+  return pad(m)+':'+pad(s)+'.'+d;
+}
+function fmtTgl(ts){
+  if(!ts) return '—';
+  const d = new Date(ts);
+  return pad(d.getDate())+' '+['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][d.getMonth()]
+    +' '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+/* Kecepatan rata-rata satu lap.
+   keliling loop (m) ÷ waktu lap (s) × 3.6 = km/h.
+   Contoh: 42 m / 9.4 s → 16 km/h  (masuk akal untuk RC 1/10).
+   Catatan: memakai pass_duration (0.1 s) terhadap keliling 42 m menghasilkan
+   1.500 km/h — angka mustahil, karena pass_duration mengukur waktu mobil
+   berada di bawah antena, bukan waktu menempuh satu loop. */
+function kmh(kelilingM, lapMs){
+  if(!kelilingM || !lapMs) return null;
+  return Math.round((kelilingM / (lapMs/1000)) * 3.6);
+}
+const uid = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+
+/* ---------- data contoh (nanti dari cache club) ---------- */
+const DATA = {
+  member: [
+    { id:'u1', nama:'Budi', lengkap:'Budi Santoso', nick:'Budi', kelas:'Mod',
+      mobil:'Xray X4', role:'leader', status:'active', tps:[1615544] },
+    { id:'u2', nama:'Andi', lengkap:'Andi Pratama', nick:'Andi', kelas:'Stock',
+      mobil:'Tamiya', role:'co_leader', status:'active', tps:[1712003,1712004] },
+    { id:'u3', nama:'Citra', lengkap:'Citra Dewi', nick:'Citra', kelas:'Mod',
+      mobil:'Yokomo', role:'member', status:'active', tps:[1810044] },
+    { id:'u4', nama:'Rudi', lengkap:'Rudi Hartono', nick:'Rudi', kelas:'Stock',
+      mobil:'Tamiya', role:'officer', status:'active', tps:[1912007] },
+    { id:'u5', nama:'Sari', lengkap:'Sari Wulandari', nick:'Sari', kelas:'Mod',
+      mobil:'—', role:'member', status:'pending', tps:[] }
+  ],
+  track: [
+    { id:'t1', name:'Sirkuit Medan RC · Layout A', addr:'Jl. Gatot Subroto, Medan',
+      width:42, note:'4 tikungan, aspal', best:9402, holder:'Budi', sesi:37, sync:true },
+    { id:'t2', name:'Sirkuit Medan RC · Layout B', addr:'Jl. Gatot Subroto, Medan',
+      width:58, note:'6 tikungan, aspal', best:12118, holder:'Andi', sesi:12, sync:true },
+    { id:'t3', name:'Lapangan Deli Serdang · Oval', addr:'Lubuk Pakam, Deli Serdang',
+      width:35, note:'oval, beton', best:7880, holder:'Citra', sesi:5, sync:false }
+  ],
+  preset: [
+    { id:'p1', name:'Sprint 3 menit', target:'time', value:180, rank:'lapsTime', start:'grid', cd:5, sound:1 },
+    { id:'p2', name:'Final 5 menit · 10 lap', target:'laps', value:10, rank:'best', start:'grid', cd:5, sound:1 },
+    { id:'p3', name:'Endurance 10 menit', target:'time', value:600, rank:'top3', start:'staggered', cd:10, sound:1 }
+  ]
+};
+
+/* ---------- state aplikasi (disimpan di localStorage) ---------- */
+const DB_KEY = 'yurlaps.qr.v1';
+const state = {
+  trackId:'t1', presetId:'p1',
+  cfg:{ name:'Quick Race', target:'time', value:180, rank:'lapsTime', start:'grid', cd:5, sound:1 },
+  peserta:[],            // [{uid, memberId, name, nick, kelas, mobil, tp, no}]
+  history:[],
+  konfig:'p1'            // preset yang terakhir diterapkan
+};
+
+function muat(){
+  let s = null;
+  try{
+    s = JSON.parse(localStorage.getItem(DB_KEY) || 'null');
+    if(s) Object.assign(state, s);
+  }catch(e){ s = null; /* data rusak -> pakai bawaan */ }
+  // track/peserta dari localStorage digabung dengan contoh bila kosong
+  if(s && Array.isArray(s.tracks) && s.tracks.length) DATA.track = s.tracks;
+  if(s && Array.isArray(s.presets) && s.presets.length) DATA.preset = s.presets;
+  if(!DATA.track.some(t => t.id === state.trackId)) state.trackId = DATA.track[0].id;
+  if(!DATA.preset.some(p2 => p2.id === state.presetId)) state.presetId = DATA.preset[0].id;
+}
+function simpan(){
+  // track & preset ikut disimpan: kalau tidak, track baru hilang saat aplikasi ditutup
+  state.tracks = DATA.track;
+  state.presets = DATA.preset;
+  try{ localStorage.setItem(DB_KEY, JSON.stringify(state)); }catch(e){}
+}
+function sinkronPeserta(){
+  // Saat sesi belum berjalan, papan skor menampilkan daftar peserta terpilih.
+  // Saat live/countdown, jangan disentuh: lap yang sudah tercatat tidak boleh hilang.
+  if(sesi.status === 'live' || sesi.status === 'countdown') return;
+  const nomorLama = new Map(sesi.peserta.map(p => [p.uid, p]));
+  sesi.peserta = state.peserta.map((p,i) => {
+    const lama = nomorLama.get(p.uid);
+    return {
+      uid:p.uid, no:i+1, name:p.name, nick:p.nick, tp:p.tp, kelas:p.kelas, luar:!!p.luar,
+      laps: lama ? lama.laps : [], durUs: lama ? lama.durUs : null,
+      terakhir: lama ? lama.terakhir : 0
+    };
+  });
+  if(!sesi.pilihan && sesi.peserta.length) sesi.pilihan = sesi.peserta[0].uid;
+  if(sesi.pilihan && !sesi.peserta.some(p => p.uid === sesi.pilihan))
+    sesi.pilihan = sesi.peserta[0] ? sesi.peserta[0].uid : null;
+}
+
+function trackAktif(){ return DATA.track.find(t => t.id === state.trackId) || DATA.track[0]; }
+function presetAktif(){ return DATA.preset.find(p => p.id === state.presetId) || DATA.preset[0]; }
+
+/* ---------- sesi berjalan ---------- */
+const sesi = {
+  status:'idle',      // idle | countdown | live | done
+  mulai:0, elapsed:0, sisa:0,
+  peserta:[],         // salinan dengan data lap
+  log:[],             // passing log {t, uid, name, rssi, lap, skip, durUs, kmh}
+  timer:null, simTimer:null, cdTimer:null,
+  pilihan:null
+};
+
+/* ============================================================================
+   TOAST
+   ========================================================================== */
+let toastTimer = null;
+function toast(msg){
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 1900);
+}
+
+/* ============================================================================
+   NAVIGASI
+   ========================================================================== */
+const VIEWS = ['quickrace','history','member','track','decoder'];
+function show(v){
+  VIEWS.forEach(k => { const s = $('view-' + k); if(s) s.style.display = (k === v) ? '' : 'none'; });
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => show(t.dataset.view));
+
+/* ============================================================================
+   RENDER: TRACK + PRESET
+   ========================================================================== */
+function renderTrackSelect(){
+  const sel = $('selTrack');
+  sel.innerHTML = DATA.track.map(t =>
+    `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  sel.value = state.trackId;
+  sel.disabled = sesi.status === 'live' || sesi.status === 'countdown';
+  const t = trackAktif();
+  $('topTrack').textContent = t.name;
+  $('footTrack').textContent = t.name;
+  $('trackMeta').innerHTML =
+    `<b>${t.sesi} sesi di track ini</b><span>Rekor: ${fmtLap(t.best)} · ${esc(t.holder)}`
+    + (t.width ? ` · lebar loop ${t.width} m` : ' · lebar loop belum diisi') + `</span>`;
+  $('trackSrc').textContent = t.sync ? 'tersinkron' : 'belum disinkron';
+}
+function renderPresetSelect(){
+  const sel = $('selPreset');
+  sel.innerHTML = DATA.preset.map(p =>
+    `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  sel.value = state.presetId;
+}
+function renderChips(){
+  const c = state.cfg;
+  const target = c.target === 'time'
+    ? `waktu ${Math.round(c.value/60)} menit`
+    : `${c.value} lap`;
+  const rank = ({lapsTime:'Lap → total waktu', best:'Best lap', top3:'Rata² 3 lap tercepat',
+    consecutive:'3 lap berurutan'})[c.rank] || c.rank;
+  const mulai = c.start === 'grid' ? 'grid bersamaan' : 'bergiliran';
+  const chips = [
+    ['Target', target], ['Urutan', rank], ['Mulai', mulai],
+    ['Hitung mundur', c.cd + ' detik'], ['Timing', 'YurLaps Decoder']
+  ];
+  let html = chips.map(([k,v]) => `<span class="chip">${k}: <b>${esc(v)}</b></span>`).join('');
+  const t = trackAktif();
+  if(!t.width) html += `<span class="chip warn">Lebar loop belum diisi — km/h tidak dihitung</span>`;
+  if(!sesi.peserta.length) html += `<span class="chip warn">Belum ada peserta</span>`;
+  $('chips').innerHTML = html;
+  $('qrTitle').textContent = c.name + ' · ' + t.name;
+}
+
+/* ============================================================================
+   RENDER: PAPAN SKOR
+   ========================================================================== */
+function rata(a){ return a.length ? a.reduce((x,y) => x + y, 0) / a.length : null; }
+function sigma(a){
+  if(a.length < 2) return null;
+  const m = rata(a);
+  return Math.sqrt(a.reduce((s,v) => s + (v-m)*(v-m), 0) / a.length);
+}
+function urutkan(){
+  const c = state.cfg;
+  const skor = p => {
+    const h = [...p.laps].sort((a,b) => a - b);
+    if(c.rank === 'best')  return [h.length ? h[0] : Infinity];
+    if(c.rank === 'top3')  return [h.length >= 3 ? rata(h.slice(0,3)) : Infinity];
+    if(c.rank === 'consecutive'){
+      const tiga = [];
+      for(let i = 2; i < p.laps.length; i++)
+        tiga.push((p.laps[i-2] + p.laps[i-1] + p.laps[i]) / 3);
+      return [tiga.length ? Math.min(...tiga) : Infinity];
+    }
+    const total = p.laps.length ? p.laps.reduce((a,b) => a + b, 0) : Infinity;
+    return [-p.laps.length, total];
+  };
+  return [...sesi.peserta].sort((a,b) => {
+    const x = skor(a), y = skor(b);
+    for(let i = 0; i < Math.max(x.length, y.length); i++){
+      const xi = x[i] === undefined ? Infinity : x[i];
+      const yi = y[i] === undefined ? Infinity : y[i];
+      if(xi !== yi) return xi - yi;
+    }
+    return a.no - b.no;
+  });
+}
+
+function renderBoard(){
+  const body = $('boardBody');
+  const kosong = $('boardEmpty'), tabel = $('board');
+  if(!sesi.peserta.length){
+    kosong.style.display = ''; tabel.style.display = 'none';
+    $('detailCard').hidden = true;
+    return;
+  }
+  kosong.style.display = 'none'; tabel.style.display = '';
+  const urut = urutkan();
+  const terbaik = Math.min(...sesi.peserta.filter(p => p.laps.length)
+    .map(p => Math.min(...p.laps)).concat([Infinity]));
+  const t = trackAktif();
+
+  body.innerHTML = urut.map((p, i) => {
+    const best = p.laps.length ? Math.min(...p.laps) : null;
+    const avg  = rata(p.laps);
+    const sig  = sigma(p.laps);
+    const last = p.laps.length ? p.laps[p.laps.length-1] : null;
+    const v    = kmh(t.width, best || avg);
+    const st = sesi.status === 'live'
+      ? (best != null && best === terbaik ? '<span class="st-live">tercepat</span>'
+         : '<span class="st-run">jalan</span>')
+      : (p.laps.length ? '<span class="st-run">selesai</span>'
+         : '<span class="st-out">belum lintas</span>');
+    const luar = p.luar ? '<span class="outside">bukan member</span>' : '';
+    return `<tr class="row ${sesi.pilihan === p.uid ? 'sel' : ''}" data-uid="${p.uid}">
+      <td class="pos ${i === 0 ? 'first' : ''}">${i+1}</td>
+      <td class="nm">${esc(p.nick || p.name)}${luar}<small>${esc(p.name)} · TP ${p.tp}</small></td>
+      <td class="num r">${p.laps.length}</td>
+      <td class="num r">${fmtLap(last)}</td>
+      <td class="best r">${fmtLap(best)}</td>
+      <td class="num r">${fmtLap(avg)}</td>
+      <td class="sig r">${sig == null ? '—' : (sig/1000).toFixed(3)}</td>
+      <td class="spd r">${v == null ? '—' : '<b>' + v + '</b>'}</td>
+      <td class="r">${st}</td></tr>`;
+  }).join('');
+
+  body.querySelectorAll('tr.row').forEach(tr => {
+    tr.onclick = () => { sesi.pilihan = tr.dataset.uid; renderBoard(); renderDetail(); };
+  });
+  if(!sesi.pilihan && urut.length) sesi.pilihan = urut[0].uid;
+}
+
+function renderDetail(){
+  const p = sesi.peserta.find(x => x.uid === sesi.pilihan);
+  const card = $('detailCard');
+  if(!p){ card.hidden = true; return; }
+  card.hidden = false;
+  $('dNama').textContent = p.no;
+  $('dAv').textContent = (p.nick || p.name).slice(0,2).toUpperCase();
+  $('dPanggil').textContent = p.nick || p.name;
+  $('dLengkap').textContent = `${p.name} · TP ${p.tp}`;
+  const best = p.laps.length ? Math.min(...p.laps) : null;
+  const avg = rata(p.laps), sig = sigma(p.laps);
+  $('dBest').textContent = fmtLap(best);
+  $('dAvg').textContent  = fmtLap(avg);
+  $('dSig').textContent  = sig == null ? '—' : (sig/1000).toFixed(3);
+  $('dLaps').textContent = p.laps.length;
+
+  // grafik
+  const h = p.laps.slice(-16);
+  if(h.length > 1){
+    const mn = Math.min(...h), mx = Math.max(...h), rng = (mx-mn) || 1;
+    const pts = h.map((v,i) => `${4 + i*(232/(h.length-1))},${40 - ((mx-v)/rng)*28}`).join(' ');
+    $('dGraph').setAttribute('points', pts);
+  } else $('dGraph').setAttribute('points', '');
+
+  // daftar lap
+  const rows = p.laps.map((v,i) => {
+    const d = i ? v - p.laps[i-1] : null;
+    const dd = d == null ? '' :
+      `<span class="d ${d <= 0 ? 'up' : 'down'}">${d <= 0 ? '−' : '+'}${(Math.abs(d)/1000).toFixed(3)}</span>`;
+    return `<div class="lap"><span class="n">L${i+1}</span><span class="t">${fmtLap(v)}</span>
+      <span class="v">${v === best ? 'best' : ''}</span>${dd}</div>`;
+  }).reverse().join('');
+  $('dLapList').innerHTML = rows || '<div class="note">Belum ada lap.</div>';
+}
+
+/* ============================================================================
+   PASSING LOG
+   ========================================================================== */
+function renderLog(){
+  const box = $('pLog');
+  $('pLogN').textContent = sesi.log.length + ' lintasan';
+  if(!sesi.log.length){
+    box.innerHTML = '<div class="note">Belum ada lintasan. Tekan Start, lalu pembalap melewati garis.</div>';
+    return;
+  }
+  box.innerHTML = sesi.log.slice(0, 30).map(e => `
+    <div class="prow ${e.skip ? 'skip' : ''}">
+      <span class="tm">${e.jam}</span>
+      <span class="nm">${esc(e.nama)}<small>TP ${e.tp}${e.skip ? ' · bukan peserta' : ''}</small></span>
+      <span class="rs">${e.rssi.toFixed(1)}</span>
+      <span class="lp">${e.skip ? 'luar' : 'L' + e.lap}</span>
+    </div>`).join('');
+}
+
+/* ============================================================================
+   COUNTDOWN + START + FINISH
+   ========================================================================== */
+function bunyi(freq, dur){
+  if(!state.cfg.sound) return;
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    if(!bunyi.ctx) bunyi.ctx = new AC();
+    const ctx = bunyi.ctx;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'square'; o.frequency.value = freq;
+    g.gain.value = .05;
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + dur);
+  }catch(e){}
+}
+
+function mulaiCountdown(){
+  if(!state.peserta.length){ toast('Pilih peserta dulu'); openPeserta(); return; }
+  if(sesi.status === 'live'){ toast('Sesi sedang berjalan'); return; }
+
+  // siapkan sesi baru dari peserta terpilih
+  sesi.peserta = state.peserta.map((p,i) => ({
+    uid:p.uid, no:i+1, name:p.name, nick:p.nick, tp:p.tp, kelas:p.kelas,
+    luar:!!p.luar, laps:[], durUs:null, terakhir:0
+  }));
+  sesi.log = []; sesi.pilihan = sesi.peserta[0] ? sesi.peserta[0].uid : null;
+  sesi.status = 'countdown';
+  renderBoard(); renderDetail(); renderTombol();
+
+  const n = state.cfg.cd;
+  let sisa = n;
+  const layer = $('cdLayer');
+  layer.hidden = false;
+  document.body.classList.add('busy');
+  $('cdWho').textContent = `${trackAktif().name} · ${sesi.peserta.length} pembalap`;
+  const langkah = () => {
+    $('cdNum').textContent = sisa;
+    $('cdNum').className = 'n';
+    $('cdCap').textContent = sisa === n ? 'Bersiap' : 'Menuju garis start';
+    bunyi(660, .18);
+    if(sisa === 0){
+      $('cdNum').textContent = 'GO';
+      $('cdNum').className = 'n go';
+      $('cdCap').textContent = 'Balapan dimulai';
+      bunyi(1180, .4);
+      clearInterval(sesi.cdTimer);
+      setTimeout(() => { layer.hidden = true; document.body.classList.remove('busy'); mulaiLive(); }, 700);
+      return;
+    }
+    sisa--;
+  };
+  langkah();
+  sesi.cdTimer = setInterval(langkah, 1000);
+  renderTombol();
+}
+
+function mulaiLive(){
+  sesi.status = 'live';
+  sesi.mulai = performance.now();
+  sesi.elapsed = 0;
+  if(state.cfg.start === 'staggered') sesi.peserta.forEach((p,i) => { if(i > 0) p.tunggu = true; });
+  clearInterval(sesi.timer);
+  sesi.timer = setInterval(tick, 100);
+  jadwalkanSim();
+  $('liveTag').className = 'live';
+  $('liveTag').innerHTML = '<i></i>LIVE';
+  $('asideDec').textContent = 'aktif · sesi berjalan';
+  renderTombol();
+  toast('Quick Race dimulai');
+}
+
+function tick(){
+  if(sesi.status !== 'live') return;
+  sesi.elapsed = performance.now() - sesi.mulai;
+  const target = state.cfg.target === 'time' ? state.cfg.value * 1000 : 0;
+  const sisa = target ? target - sesi.elapsed : sesi.elapsed;
+  $('qrClock').textContent = target ? fmtClock(sisa) : fmtClock(sesi.elapsed);
+  if(target && sesi.elapsed >= target) selesai('waktu habis', true);
+}
+
+/* simulasi lintasan: pengganti decoder selama offline */
+function jadwalkanSim(){
+  clearTimeout(sesi.simTimer);
+  const putar = () => {
+    if(sesi.status !== 'live') return;
+    catatLintasan();
+    sesi.simTimer = setTimeout(putar, 900 + Math.random() * 1400);
+  };
+  sesi.simTimer = setTimeout(putar, 1200);
+}
+
+function catatLintasan(manual){
+  if(!sesi.peserta.length) return;
+  const hidup = sesi.peserta.filter(p => !p.tunggu);
+  const p = hidup[Math.floor(Math.random() * hidup.length)];
+  if(!p) return;
+  const t = trackAktif();
+
+  // kecepatan: waktu tempuh di bawah antena (pass_duration_us)
+  const durUs = 90000 + Math.round(Math.random() * 50000);
+  p.durUs = durUs;
+
+  // lap time: kalau lap pertama sejak start, pakai waktu sejak start
+  /* Mode simulasi: waktu lap dibuat wajar (8,6–10,6 detik) karena klik uji
+     bisa berdekatan. Pada penerapan nyata, angka ini datang dari timestamp
+     lintasan decoder — bukan dari selisih jam komputer. */
+  const menitSim = 8600 + Math.round(Math.random() * 2000);
+  p.laps.push(p.laps.length === 0 ? menitSim + 400 : menitSim);
+  p.terakhir = performance.now();
+
+  sesi.log.unshift({
+    jam: new Date().toLocaleTimeString('id-ID', {hour12:false}),
+    nama: p.nick || p.name, tp: p.tp, lap: p.laps.length,
+    rssi: -45 - Math.random() * 20, skip:false, durUs
+  });
+
+  // target lap?
+  if(state.cfg.target === 'laps'){
+    const juara = sesi.peserta.filter(x => !x.tunggu);
+    if(juara.length && juara.every(x => x.laps.length >= state.cfg.value)){
+      selesai('semua lap tercatat', true); return;
+    }
+  }
+  renderBoard(); renderDetail(); renderLog(); renderDecoderLog();
+  if(manual) toast('Lintasan dicatat: ' + (p.nick || p.name));
+}
+
+function selesai(alasan, otomatis){
+  if(sesi.status !== 'live') return;
+  sesi.status = 'done';
+  clearInterval(sesi.timer); clearTimeout(sesi.simTimer);
+  $('liveTag').className = 'live idle';
+  $('liveTag').innerHTML = '<i></i>SELESAI';
+  $('asideDec').textContent = 'aktif · menunggu lintasan';
+  renderTombol(); renderBoard();
+  toast((otomatis ? 'Sesi selesai otomatis · ' : 'Sesi dihentikan · ') + alasan);
+  bukaSave(alasan);
+}
+
+function resetSesi(){
+  if(sesi.status === 'live' && !confirm('Sesi sedang berjalan. Reset akan menghapus lap yang sudah tercatat. Lanjut?')) return;
+  clearInterval(sesi.timer); clearTimeout(sesi.simTimer); clearInterval(sesi.cdTimer);
+  sesi.status = 'idle'; sesi.elapsed = 0; sesi.log = [];
+  sesi.peserta = [];
+  sesi.pilihan = null;
+  sinkronPeserta();
+  $('qrClock').textContent = '00:00.0';
+  $('liveTag').className = 'live idle';
+  $('liveTag').innerHTML = '<i></i>SIAP';
+  renderAll();
+  toast('Sesi direset');
+}
+
+function renderTombol(){
+  const st = sesi.status;
+  $('btnStart').disabled  = st === 'live' || st === 'countdown';
+  $('btnStart').innerHTML = st === 'done' ? SVG_PLAY + ' Start lagi' : SVG_PLAY + ' Start';
+  $('btnFinish').disabled = st !== 'live';
+  $('btnPeserta').disabled = st === 'live' || st === 'countdown';
+  $('selTrack').disabled = st === 'live' || st === 'countdown';
+  $('qrLead').textContent = st === 'live'
+    ? 'Sesi berjalan — lap tercatat lewat decoder.'
+    : st === 'countdown' ? 'Hitung mundur berjalan…'
+    : st === 'done' ? 'Sesi selesai. Simpan ke History Race atau reset.'
+    : 'Pilih track, pilih peserta, lalu Start.';
+}
+
+/* ============================================================================
+   SIMPAN RACE → HISTORY
+   ========================================================================== */
+function nomorSesiBaru(){
+  const n = state.history.length + 1;
+  return state.cfg.name.replace(/ #\d+$/, '') + ' #' + n;
+}
+
+function bukaSave(alasan){
+  const urut = urutkan();
+  const totalLap = sesi.peserta.reduce((s,p) => s + p.laps.length, 0);
+  $('saveName').value = nomorSesiBaru();
+  $('saveSub').textContent = 'Sesi dihentikan (' + alasan + '). '
+    + 'Sesi akan masuk ke History Race dan bisa diunggah ke website.';
+  $('saveTrack').textContent = trackAktif().name;
+  $('saveSum').textContent = sesi.peserta.length + ' pembalap · ' + totalLap + ' lap';
+  $('saveTop3').innerHTML = urut.slice(0,3).map((p,i) => {
+    const best = p.laps.length ? Math.min(...p.laps) : null;
+    return `${i+1}. <b>${esc(p.nick || p.name)}</b> — ${p.laps.length} lap`
+      + (best ? ' · best ' + fmtLap(best) : '');
+  }).join('<br>') || 'Belum ada lap tercatat.';
+  $('modalSave').hidden = false;
+}
+
+function simpanRace(){
+  const urut = urutkan();
+  const t = trackAktif();
+  const totalLap = sesi.peserta.reduce((s,p) => s + p.laps.length, 0);
+  if(!totalLap){
+    if(!confirm('Belum ada lap tercatat. Tetap simpan sesi kosong?')) return;
+  }
+  const rec = {
+    id: uid(),
+    nama: $('saveName').value.trim() || nomorSesiBaru(),
+    trackId: t.id, trackName: t.name, trackWidth: t.width,
+    mulai: Date.now() - Math.round(sesi.elapsed), durasi: Math.round(sesi.elapsed),
+    cfg: JSON.parse(JSON.stringify(state.cfg)),
+    peserta: urut.map((p,i) => ({
+      pos:i+1, uid:p.uid, name:p.name, nick:p.nick, tp:p.tp, kelas:p.kelas, luar:p.luar,
+      laps:[...p.laps],
+      best: p.laps.length ? Math.min(...p.laps) : null,
+      durUs: p.durUs, kmh: kmh(t.width, p.laps.length ? Math.min(...p.laps) : null)
+    })),
+    totalLap,
+    sync:'belum'
+  };
+  state.history.unshift(rec);
+  // rekor track ikut diperbarui kalau lebih baik
+  const best = Math.min(...rec.peserta.filter(p => p.best).map(p => p.best).concat([Infinity]));
+  if(isFinite(best) && (!t.best || best < t.best)){
+    t.best = best; t.holder = (rec.peserta.find(p => p.best === best) || {}).nick || '—';
+  }
+  simpan();
+  $('modalSave').hidden = true;
+  resetSesi();
+  renderHistory();
+  show('history');
+  toast('Sesi disimpan ke History Race');
+}
+
+/* ============================================================================
+   HISTORY
+   ========================================================================== */
+function renderHistory(){
+  const q = $('histFilter').value || 'semua';
+  const list = state.history.filter(r => q === 'semua' || r.trackId === q);
+  $('histWrap').style.display = list.length ? 'none' : '';
+  $('hist').style.display = list.length ? '' : 'none';
+  $('histCount').textContent = list.length + ' sesi';
+
+  const tb = $('histBody');
+  tb.innerHTML = list.map(r => {
+    const best = Math.min(...r.peserta.filter(p => p.best).map(p => p.best).concat([Infinity]));
+    const badge = r.sync === 'terkirim'
+      ? '<span class="st-live">terkirim</span>'
+      : '<span class="st-out">belum</span>';
+    return `<tr class="row" data-id="${r.id}">
+      <td class="nm">${esc(r.nama)}<small>${fmtTgl(r.mulai)}</small></td>
+      <td>${esc(r.trackName)}</td>
+      <td class="num r">${r.peserta.length}</td>
+      <td class="num r">${r.totalLap}</td>
+      <td class="best r">${fmtLap(isFinite(best) ? best : null)}</td>
+      <td class="num r">${fmtClock(r.durasi)}</td>
+      <td class="r">${badge}</td>
+      <td class="r"><button class="btn sm" data-act="kirim">Unggah</button></td>
+    </tr>`;
+  }).join('');
+
+  tb.querySelectorAll('tr.row').forEach(tr => {
+    tr.onclick = e => {
+      const id = tr.dataset.id;
+      if(e.target.dataset.act === 'kirim'){
+        const r = state.history.find(x => x.id === id);
+        r.sync = 'terkirim'; simpan(); renderHistory();
+        toast('Sesi diunggah ke website (mockup)'); return;
+      }
+      bukaSesi(id);
+    };
+  });
+
+  // ringkasan
+  const semua = state.history;
+  $('rTotal').textContent = semua.length;
+  $('rBelum').textContent = semua.filter(r => r.sync !== 'terkirim').length;
+  $('rSent').textContent  = semua.filter(r => r.sync === 'terkirim').length;
+  $('rLap').textContent   = semua.reduce((s,r) => s + r.totalLap, 0);
+  $('histBadge').textContent = semua.length;
+  $('histBadge').classList.toggle('on', semua.length > 0);
+  $('pilltxt').textContent = semua.filter(r => r.sync !== 'terkirim').length
+    ? 'Offline — ' + semua.filter(r => r.sync !== 'terkirim').length + ' sesi belum diunggah'
+    : 'Online — semua sesi terkirim';
+}
+
+function bukaSesi(id){
+  const r = state.history.find(x => x.id === id);
+  if(!r) return;
+  $('histSel').textContent = r.trackName;
+  $('sesiTitle').textContent = r.nama;
+  $('sesiSub').textContent = `${r.trackName} · ${r.peserta.length} pembalap · ${r.totalLap} lap · ${fmtClock(r.durasi)}`;
+  $('sesiBody').innerHTML = `
+    <table><thead><tr><th></th><th>Pembalap</th><th class="r">Lap</th><th class="r">Best</th>
+      <th class="r">km/h</th><th class="r">Rata²</th></tr></thead><tbody>
+    ${r.peserta.map(p => `<tr>
+      <td class="pos ${p.pos===1?'first':''}">${p.pos}</td>
+      <td class="nm">${esc(p.nick || p.name)}<small>${esc(p.name)} · TP ${p.tp}</small></td>
+      <td class="num r">${p.laps.length}</td>
+      <td class="best r">${fmtLap(p.best)}</td>
+      <td class="spd r">${p.kmh == null ? '—' : '<b>'+p.kmh+'</b>'}</td>
+      <td class="num r">${fmtLap(rata(p.laps))}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="note" style="margin-top:10px">
+      Urutan: ${({lapsTime:'Lap → total waktu',best:'Best lap',top3:'Rata² 3 lap tercepat',
+        consecutive:'3 lap berurutan'})[r.cfg.rank] || r.cfg.rank} ·
+      Track: ${esc(r.trackName)}${r.trackWidth ? ' · lebar loop ' + r.trackWidth + ' m' : ''}
+    </div>`;
+  $('modalSesi').hidden = false;
+
+  // isi panel kanan
+  const best = Math.min(...r.peserta.filter(p => p.best).map(p => p.best).concat([Infinity]));
+  $('histDetail').innerHTML = `
+    <div class="kv"><span>Pemenang</span><b>${esc((r.peserta[0]||{}).nick || '—')}</b></div>
+    <div class="kv"><span>Best lap</span><b style="color:var(--blue)">${fmtLap(isFinite(best)?best:null)}</b></div>
+    <div class="kv"><span>Total lap</span><b>${r.totalLap}</b></div>
+    <div class="kv"><span>Track</span><b>${esc(r.trackName)}</b></div>
+    <div class="kv"><span>Status</span><b>${r.sync === 'terkirim' ? 'terkirim' : 'belum diunggah'}</b></div>`;
+}
+
+/* ============================================================================
+   PESERTA
+   ========================================================================== */
+function openPeserta(){
+  $('rSearch').value = '';
+  renderRoster();
+  $('modalPeserta').hidden = false;
+}
+function renderRoster(){
+  const q = ($('rSearch').value || '').toLowerCase();
+  const box = $('rRows');
+  const dipilih = new Map(state.peserta.map(p => [p.memberId, p]));
+  const rows = DATA.member.filter(m => {
+    if(!q) return true;
+    return (m.nama + ' ' + m.nick + ' ' + m.tps.join(' ')).toLowerCase().includes(q);
+  });
+  box.innerHTML = rows.map(m => {
+    const on = dipilih.has(m.id);
+    const p = dipilih.get(m.id);
+    const tp = p ? p.tp : (m.tps[0] || '');
+    const no = p ? p.no : '';
+    return `<div class="rrow ${on ? 'on' : ''}" data-id="${m.id}">
+      <input type="checkbox" ${on ? 'checked' : ''} data-chk>
+      <span class="nm"><b>${esc(m.nama)}</b><small>${m.status === 'pending'
+        ? 'menunggu persetujuan' : esc(m.mobil + ' · ' + m.role)}</small></span>
+      <input type="number" min="1" max="99" value="${no}" placeholder="no" data-no>
+      <input type="text" value="${esc(m.kelas)}" data-kelas>
+      <input type="text" value="${esc(tp)}" placeholder="transponder" data-tp>
+    </div>`;
+  }).join('') || '<div class="note" style="padding:14px">Tidak ada member yang cocok.</div>';
+
+  const info = () => $('rInfo').textContent = state.peserta.length + ' dipilih';
+  info();
+
+  box.querySelectorAll('.rrow').forEach(row => {
+    const id = row.dataset.id;
+    const m = DATA.member.find(x => x.id === id);
+    const chk = row.querySelector('[data-chk]');
+    const inpNo = row.querySelector('[data-no]');
+    const inpTp = row.querySelector('[data-tp]');
+    const inpKelas = row.querySelector('[data-kelas]');
+
+    chk.onchange = () => {
+      if(chk.checked){
+        const tp = inpTp.value.trim() || (m.tps[0] || '');
+        const no = Number(inpNo.value) || (state.peserta.length + 1);
+        state.peserta.push({ uid: uid(), memberId: m.id, name: m.lengkap, nick: m.nama,
+          kelas: inpKelas.value.trim() || m.kelas, mobil: m.mobil, tp, no, luar: !m.tps.length });
+        inpTp.value = tp;
+      } else {
+        state.peserta = state.peserta.filter(p => p.memberId !== m.id);
+      }
+      renderRoster(); info(); simpan();
+    };
+    const ubah = () => {
+      const p = state.peserta.find(x => x.memberId === id);
+      if(!p) return;
+      p.tp = inpTp.value.trim() || p.tp;
+      p.no = Number(inpNo.value) || p.no;
+      p.kelas = inpKelas.value.trim() || p.kelas;
+      simpan();
+    };
+    inpTp.onchange = ubah; inpNo.onchange = ubah; inpKelas.onchange = ubah;
+  });
+}
+$('rSearch').oninput = renderRoster;
+$('rAll').onclick = () => {
+  DATA.member.forEach(m => {
+    if(state.peserta.some(p => p.memberId === m.id)) return;
+    state.peserta.push({ uid: uid(), memberId: m.id, name: m.lengkap, nick: m.nama,
+      kelas: m.kelas, mobil: m.mobil, tp: m.tps[0] || '', no: state.peserta.length + 1,
+      luar: !m.tps.length });
+  });
+  renderRoster(); simpan();
+};
+$('rNone').onclick = () => { state.peserta = []; renderRoster(); simpan(); };
+$('rCancel').onclick = () => { $('modalPeserta').hidden = true; };
+$('rSave').onclick = () => {
+  $('modalPeserta').hidden = true;
+  // nomor urut dirapikan
+  state.peserta.sort((a,b) => a.no - b.no).forEach((p,i) => p.no = i+1);
+  simpan(); $('modalPeserta').hidden = true;
+  sesi.status = sesi.status === 'live' ? 'live' : 'idle';
+  renderAll();
+  toast(state.peserta.length + ' peserta disiapkan');
+};
+
+/* ============================================================================
+   PENGATURAN
+   ========================================================================== */
+function bukaSetting(){
+  const c = state.cfg;
+  $('setName').value = c.name;
+  pilihChip('setTarget', c.target);
+  $('setValue').innerHTML = c.target === 'time'
+    ? [[180,'3 menit'],[300,'5 menit'],[600,'10 menit'],[900,'15 menit']]
+      .map(([v,t]) => `<option value="${v}">${t}</option>`).join('')
+    : [[5,'5 lap'],[10,'10 lap'],[20,'20 lap'],[30,'30 lap']]
+      .map(([v,t]) => `<option value="${v}">${t}</option>`).join('');
+  $('setValue').value = c.value;
+  $('setTargetLbl').textContent = c.target === 'time' ? 'Durasi' : 'Jumlah lap';
+  $('setRank').value = c.rank;
+  $('setStart').value = c.start;
+  $('setCd').value = c.cd;
+  pilihChip('setSound', String(c.sound));
+  $('modalSetting').hidden = false;
+  tandaiDirty();
+}
+function pilihChip(wrapId, v){
+  document.querySelectorAll('#' + wrapId + ' button').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === String(v)));
+}
+document.querySelectorAll('#setTarget button').forEach(b => b.onclick = () => {
+  pilihChip('setTarget', b.dataset.v);
+  $('setTargetLbl').textContent = b.dataset.v === 'time' ? 'Durasi' : 'Jumlah lap';
+  $('setValue').innerHTML = b.dataset.v === 'time'
+    ? [[180,'3 menit'],[300,'5 menit'],[600,'10 menit'],[900,'15 menit']]
+      .map(([v,t]) => `<option value="${v}">${t}</option>`).join('')
+    : [[5,'5 lap'],[10,'10 lap'],[20,'20 lap'],[30,'30 lap']]
+      .map(([v,t]) => `<option value="${v}">${t}</option>`).join('');
+  tandaiDirty();
+});
+document.querySelectorAll('#setSound button').forEach(b => b.onclick = () => {
+  pilihChip('setSound', b.dataset.v); tandaiDirty();
+});
+['setName','setValue','setRank','setStart','setCd'].forEach(id =>
+  $(id).oninput = tandaiDirty);
+
+let dirty = false;
+function tandaiDirty(){
+  dirty = true;
+  $('presetState').textContent = 'diubah · belum disimpan';
+  $('presetState').className = 'dirty';
+}
+function tandaiSimpan(){
+  dirty = false;
+  $('presetState').textContent = 'tersimpan';
+  $('presetState').className = 'dirty ok';
+}
+$('setCancel').onclick = () => { $('modalSetting').hidden = true; };
+$('setSave').onclick = () => {
+  const target = document.querySelector('#setTarget button.on').dataset.v;
+  state.cfg = {
+    name: $('setName').value.trim() || 'Quick Race',
+    target,
+    value: Number($('setValue').value),
+    rank: $('setRank').value,
+    start: $('setStart').value,
+    cd: Number($('setCd').value),
+    sound: Number(document.querySelector('#setSound button.on').dataset.v)
+  };
+  $('modalSetting').hidden = true;
+  simpan(); renderAll();
+  toast('Pengaturan diterapkan');
+};
+
+/* ============================================================================
+   PRESET
+   ========================================================================== */
+$('gearBtn').onclick = e => {
+  e.stopPropagation();
+  const m = $('gearMenu');
+  if(m.hasAttribute('hidden')) m.removeAttribute('hidden'); else m.setAttribute('hidden','');
+};
+document.addEventListener('click', e => {
+  const m = $('gearMenu');
+  if(!m.hasAttribute('hidden') && !m.contains(e.target) && e.target !== $('gearBtn'))
+    m.setAttribute('hidden','');
+});
+$('btnApply').onclick = () => {
+  const p = presetAktif();
+  state.presetId = p.id;
+  state.cfg = { name:p.name, target:p.target, value:p.value, rank:p.rank,
+    start:p.start, cd:p.cd, sound:p.sound };
+  simpan(); renderAll(); tandaiSimpan();
+  toast('Preset diterapkan: ' + p.name);
+};
+$('selPreset').onchange = () => {
+  state.presetId = $('selPreset').value;
+  const p = presetAktif();
+  $('presetName').textContent = p.name;
+  tandaiDirty();
+};
+$('btnSaveAs').onclick = () => {
+  const nama = prompt('Nama preset baru:', state.cfg.name + ' (salinan)');
+  if(!nama) return;
+  const p = Object.assign({ id:'p' + Date.now().toString(36) }, state.cfg, { name:nama });
+  DATA.preset.push(p);
+  state.presetId = p.id; simpan();
+  renderPresetSelect(); $('presetName').textContent = p.name; tandaiSimpan();
+  toast('Preset disimpan: ' + nama);
+};
+$('mEdit').onclick = () => { $('gearMenu').setAttribute('hidden',''); bukaSetting(); };
+$('mDup').onclick = () => {
+  $('gearMenu').setAttribute('hidden','');
+  const p = Object.assign({}, presetAktif(), { id:'p' + Date.now().toString(36),
+    name:presetAktif().name + ' (salinan)' });
+  DATA.preset.push(p); state.presetId = p.id; simpan(); renderPresetSelect();
+  toast('Preset diduplikat');
+};
+$('mNew').onclick = () => { $('gearMenu').setAttribute('hidden',''); bukaSetting(); };
+$('mDel').onclick = () => {
+  $('gearMenu').setAttribute('hidden','');
+  if(DATA.preset.length <= 1){ toast('Minimal satu preset harus ada'); return; }
+  const p = presetAktif();
+  if(!confirm('Hapus preset "' + p.name + '"? Sesi yang sudah tersimpan tidak berubah.')) return;
+  DATA.preset = DATA.preset.filter(x => x.id !== p.id);
+  state.presetId = DATA.preset[0].id; simpan();
+  renderPresetSelect(); renderAll();
+  toast('Preset dihapus');
+};
+
+/* ============================================================================
+   TRACK
+   ========================================================================== */
+function renderTrackPage(){
+  const wrap = $('trackWrap');
+  wrap.innerHTML = DATA.track.map(t => `
+    <div class="trackrow" data-id="${t.id}">
+      <span class="ico"><svg viewBox="0 0 24 24"><path d="M5 5c-4 0-4 14 0 14h4c4 0 2-6 6-6h3c5 0 5-8 0-8z"/></svg></span>
+      <span class="who"><b>${esc(t.name)} ${t.sync
+        ? '<span class="badge-sync ya">tersinkron</span>'
+        : '<span class="badge-sync belum">belum sinkron</span>'}</b>
+        <span>${esc(t.addr || '—')}${t.width ? ' · lebar loop ' + t.width + ' m' : ' · lebar loop belum diisi'}</span></span>
+      <span class="rec"><b>${fmtLap(t.best)}</b>${esc(t.holder || '—')}</span>
+      <span class="act">
+        <button class="btn sm" data-act="edit">Edit</button>
+        <button class="btn sm icon danger" data-act="del" title="Hapus">×</button>
+      </span>
+    </div>`).join('') || '<div class="empty"><b>Belum ada track</b>Tekan “Tambah track”.</div>';
+
+  wrap.querySelectorAll('.trackrow').forEach(row => {
+    const id = row.dataset.id;
+    row.querySelectorAll('button').forEach(b => b.onclick = () => {
+      if(b.dataset.act === 'edit') bukaTrack(id);
+      else if(b.dataset.act === 'del'){
+        if(DATA.track.length <= 1){ toast('Minimal satu track harus ada'); return; }
+        if(!confirm('Hapus track ini? Sesi lama tetap tersimpan dengan nama track-nya.')) return;
+        DATA.track = DATA.track.filter(t => t.id !== id);
+        if(state.trackId === id) state.trackId = DATA.track[0].id;
+        simpan(); renderTrackPage(); renderTrackSelect(); renderAll();
+        toast('Track dihapus');
+      }
+    });
+  });
+
+  $('chipTrackN').textContent = DATA.track.length + ' track';
+  $('chipTrackSync').textContent = DATA.track.filter(t => !t.sync).length + ' belum disinkronkan';
+  $('mTrack').textContent = DATA.track.length;
+}
+
+let editTrackId = null;
+function bukaTrack(id){
+  editTrackId = id || null;
+  const t = id ? DATA.track.find(x => x.id === id) : null;
+  $('trkTitle').textContent = t ? 'Edit track' : 'Tambah track';
+  $('trkName').value = t ? t.name : '';
+  $('trkAddr').value = t ? (t.addr || '') : '';
+  $('trkWidth').value = t ? (t.width || '') : '';
+  $('trkNote').value = t ? (t.note || '') : '';
+  hitungTrack();
+  $('modalTrack').hidden = false;
+}
+function hitungTrack(){
+  const w = Number($('trkWidth').value);
+  $('trkHitung').innerHTML = w
+    ? `Lebar loop <b>${w} m</b> — contoh kecepatan rata-rata satu lap: `
+      + `lap 9.4 s → <b>${kmh(w,9400)} km/h</b>; lap 12.1 s → <b>${kmh(w,12100)} km/h</b>`
+    : 'Isi lebar loop untuk melihat contoh kecepatan.';
+}
+$('trkWidth').oninput = hitungTrack;
+$('trkCancel').onclick = () => { $('modalTrack').hidden = true; };
+$('trkSave').onclick = () => {
+  const name = $('trkName').value.trim();
+  if(!name){ toast('Nama track belum diisi'); $('trkName').focus(); return; }
+  const w = Number($('trkWidth').value) || 0;
+  if(editTrackId){
+    const t = DATA.track.find(x => x.id === editTrackId);
+    t.name = name; t.addr = $('trkAddr').value.trim(); t.width = w;
+    t.note = $('trkNote').value.trim(); t.sync = false;
+  } else {
+    DATA.track.push({ id:'t' + Date.now().toString(36), name, addr:$('trkAddr').value.trim(),
+      width:w, note:$('trkNote').value.trim(), best:null, holder:'—', sesi:0, sync:false });
+  }
+  simpan(); $('modalTrack').hidden = true;
+  renderTrackPage(); renderTrackSelect(); renderAll();
+  toast(editTrackId ? 'Track diperbarui' : 'Track ditambahkan');
+};
+$('btnTrackAdd').onclick = () => bukaTrack(null);
+$('btnTrackSync').onclick = () => {
+  let n = 0;
+  DATA.track.forEach(t => { if(!t.sync){ t.sync = true; n++; } });
+  simpan(); renderTrackPage(); renderTrackSelect();
+  toast(n ? n + ' track disinkronkan ke website (mockup)' : 'Semua track sudah tersinkron');
+};
+
+/* ============================================================================
+   MEMBER + DECODER
+   ========================================================================== */
+function renderMember(){
+  const q = ($('memberSearch').value || '').toLowerCase();
+  const list = DATA.member.filter(m =>
+    !q || (m.nama + ' ' + m.lengkap + ' ' + m.tps.join(' ')).toLowerCase().includes(q));
+  $('memberList').innerHTML = list.map(m => `
+    <div class="member">
+      <span class="avatar">${esc(m.nama.slice(0,2).toUpperCase())}</span>
+      <span class="who"><b>${esc(m.nama)}</b><span>${esc(m.lengkap)}</span></span>
+      <span class="tps">${m.tps.length ? m.tps.map(t => `<span class="tp">${t}</span>`).join('')
+        : '<span style="font-size:10px">belum ada</span>'}<br>${esc(m.mobil)} · ${esc(m.kelas)}</span>
+      <span class="role ${m.role}">${m.role.replace('_','-')}</span>
+      <span class="st-p ${m.status}">${m.status === 'active' ? 'aktif' : 'menunggu'}</span>
+    </div>`).join('') || '<div class="empty">Tidak ada member yang cocok.</div>';
+  $('memberCount').textContent = list.length + ' tampil';
+  $('mActive').textContent  = DATA.member.filter(m => m.status === 'active').length;
+  $('mPending').textContent = DATA.member.filter(m => m.status === 'pending').length;
+  $('mTp').textContent = DATA.member.reduce((s,m) => s + m.tps.length, 0);
+  $('mTrack').textContent = DATA.track.length;
+}
+$('memberSearch').oninput = renderMember;
+
+const decLog = [];
+function renderDecoderLog(){
+  const body = $('decLogBody');
+  $('decLogN').textContent = decLog.length + ' terakhir';
+  body.innerHTML = decLog.slice(0, 20).map(e => `
+    <tr><td class="mono">${e.tp}</td><td class="nm">${esc(e.nama)}</td>
+      <td class="num r">${e.rssi.toFixed(1)}</td>
+      <td class="num r">${(e.durUs/1e6).toFixed(3)} s</td>
+      <td class="spd r">${e.kmh == null ? '—' : '<b>'+e.kmh+'</b>'}</td>
+      <td class="num r">${e.jam}</td></tr>`).join('')
+    || '<tr><td colspan="6"><div class="note">Belum ada lintasan.</div></td></tr>';
+  const perMenit = decLog.length ? Math.round(decLog.length / Math.max(1, (Date.now() - decLog[0].t)/60000)) : 0;
+  $('decRate').textContent = perMenit;
+}
+$('btnDecStop').onclick = () => {
+  $('decLed').innerHTML = '<i style="background:#a9b5c3;box-shadow:none"></i>berhenti';
+  $('decLed').style.color = 'var(--muted)';
+  toast('Decoder dihentikan (mockup)');
+};
+$('btnDecStart').onclick = () => {
+  $('decLed').innerHTML = '<i></i>aktif';
+  $('decLed').style.color = '';
+  toast('Decoder dijalankan ulang (mockup)');
+};
+
+/* ============================================================================
+   AKSI TOMBOL QUICK RACE
+   ========================================================================== */
+$('btnPeserta').onclick = openPeserta;
+$('btnSetting').onclick = bukaSetting;
+$('btnReset').onclick = resetSesi;
+$('btnStart').onclick = mulaiCountdown;
+$('btnFinish').onclick = () => selesai('dihentikan operator', false);
+$('btnClearLog').onclick = () => { sesi.log = []; renderLog(); toast('Passing log dibersihkan'); };
+$('btnSimPass').onclick = () => {
+  if(sesi.status !== 'live'){ toast('Mulai sesi dulu'); return; }
+  catatLintasan(true);
+};
+$('selTrack').onchange = () => {
+  state.trackId = $('selTrack').value;
+  simpan(); renderTrackSelect(); renderAll();
+  toast('Track: ' + trackAktif().name);
+};
+$('saveCancel').onclick = () => { $('modalSave').hidden = true; };
+$('saveDrop').onclick = () => {
+  if(!confirm('Buang sesi ini? Lap yang tercatat akan hilang.')) return;
+  $('modalSave').hidden = true; resetSesi(); toast('Sesi dibuang');
+};
+$('saveOk').onclick = simpanRace;
+$('sesiClose').onclick = () => { $('modalSesi').hidden = true; };
+$('histFilter').onchange = renderHistory;
+
+/* ============================================================================
+   RENDER SEMUA
+   ========================================================================== */
+function renderAll(){
+  sinkronPeserta();
+  renderTrackSelect();
+  renderPresetSelect();
+  renderChips();
+  $('presetName').textContent = presetAktif().name;
+  $('nPeserta').textContent = state.peserta.length;
+  renderBoard(); renderDetail(); renderLog(); renderTombol();
+  renderMember(); renderTrackPage(); renderDecoderLog();
+}
+
+/* isi filter history */
+function isiFilterHistory(){
+  $('histFilter').innerHTML = '<option value="semua">Semua track</option>'
+    + DATA.track.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+}
+
+/* ---------- catat lintasan juga mengisi log decoder ---------- */
+const catatAsli = catatLintasan;
+catatLintasan = function(manual){
+  const sebelum = sesi.log.length;
+  catatAsli(manual);
+  if(sesi.log.length > sebelum){
+    const e = sesi.log[0];
+    const t = trackAktif();
+    decLog.unshift({ tp:e.tp, nama:e.nama, rssi:e.rssi, durUs:e.durUs,
+      kmh:null, jam:e.jam, durUs:e.durUs, t:Date.now() });
+    renderDecoderLog();
+  }
+};
+
+/* ============================================================================
+   MULAI
+   ========================================================================== */
+muat();
+isiFilterHistory();
+renderAll();
+renderHistory();
+show('quickrace');
+$('asideDec').textContent = 'aktif · menunggu lintasan';
+})();
+</script>
+</body>
+</html>

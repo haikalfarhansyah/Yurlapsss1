@@ -586,53 +586,30 @@ Teknologi sengaja dipilih konservatif: **Python + stdlib** untuk server,
 
 | Windows | Status | Catatan |
 |---|---|---|
-| **11 / 10 (21H2+)** | ✅ Didukung penuh | Jendela aplikasi via WebView2 bawaan |
+| **11 / 10 (21H2+)** | ✅ **Satu-satunya target rilis** | Jendela aplikasi via WebView2 bawaan (Electron) |
 | 10 versi lama / LTSC | ✅ | Kalau WebView2 belum ada, UI otomatis pindah ke browser |
-| **8.1** | ⚠️ Bisa, build khusus | Python 3.11 + **mode browser** (WebView2 mentok di versi 109) |
-| 8.0 | ⚠️ Tidak diuji | Sama seperti 8.1 (build Python 3.11); Windows 8.0 tanpa update sulit |
-| 7 | ⚠️ Tidak diuji | Butuh Python **3.8**; pyzmq 25+, setuptools pins, dan TLS GitHub mungkin jadi hambatan |
+| 8.1 / 8.0 / 7 | ❌ **Tidak didukung** | Jalur Tk + build Python 3.11 **dihapus** 2026-11-04 (lihat di bawah) |
 
-Angka pastinya berasal dari dua batasan resmi:
+### Kenapa Windows 8 ke bawah dibuang
 
+Dua batasan resmi, keduanya di luar kendali kami:
+
+- **Chromium (inti Electron) mensyaratkan Windows 10+.** Tidak ada jalan
+  membungkus jendela aplikasi di Windows 8.1.
 - **Python 3.12+ tidak mendukung Windows 8.1** (PEP 11, dukungan Microsoft
-  berakhir 10 Jan 2023). Python 3.11 masih bisa; 3.8 untuk Windows 7.
-- **Edge/WebView2 versi 109 adalah yang terakhir untuk Windows 7/8/8.1**, dan
-  WebView2 SDK 1.0.1519.0+ mensyaratkan Windows 10+. Jadi jendela aplikasi
-  (pywebview) **tidak** bisa dipakai di sana.
+  berakhir 10 Jan 2023). Python 3.11 adalah yang terakhir untuk 8.1, 3.8 untuk
+  Windows 7.
 
-### Cara memakai YurLaps di Windows 8.1
+Sebelumnya ada jalur alternatif UI Tk untuk Windows 8 — tapi build-nya memakai
+Python 3.12, sehingga hasilnya **tidak akan jalan di Windows 8.1** meski
+namanya begitu. Daripada memelihara build yang menjanjikan hal yang tidak bisa
+diberikan, jalur itu dihapus seluruhnya: job `build-legacy-native` di
+`build-windows.yml` dan workflow `build-windows-legacy.yml`.
 
-Dari source (butuh Python 3.11):
-
-```bat
-jalankan-win8.bat
-```
-Skrip ini membuat virtual env dengan `py -3.11`, memasang pyzmq, lalu menjalankan
-aplikasi dengan `--browser` (UI terbuka di browser default; semua fitur sama,
-termasuk scoreboard TV, akses dari HP, dan sinkronisasi online).
-
-Versi .exe untuk Windows lama: jalankan workflow
-**Build Windows EXE (Win 7/8/8.1)** di GitHub Actions (input Python 3.11, atau
-3.8 untuk Windows 7). Hasilnya `YurLaps-win8-portable.zip` — ekstrak, lalu
-jalankan `YurLaps.exe`. Build ini:
-- tidak menyertakan pywebview (tidak didukung),
-- memakai `console=True` sehingga ada jendela konsol kecil sebagai rumah
-  aplikasi sekaligus tempat log decoder terlihat,
-- tetap menjalankan decoder OpenStint + auto-reconnect seperti versi normal.
-
-## 14. Menjalankan tes
-
-```bash
-pip install pyzmq flask
-python tests/test_smoke.py
-python tests/test_integration.py
-python tests/test_manager.py      # auto-restart decoder + pembaruan (butuh ~30 s)
-python tests/native_check.py      # UI native: dialog nama, Driver, gain, CSV
-```
-
-`tests/native_check.py` butuh layar. Di Linux tanpa desktop: `xvfb-run -a python
-tests/native_check.py`. Uji UI web (`tests/ui_check.py`) perlu Playwright dan
-aplikasi berjalan dengan `--web`.
+Berkas `stintlab-win8.spec`, `run_stintlab_win8.py`, dan `jalankan-win8.bat`
+**tetap disimpan** (namanya tidak diubah) sebagai bahan bangun manual kalau
+suatu hari benar-benar dibutuhkan dengan Python 3.11, tetapi **tidak lagi
+diuji di CI** dan tidak didukung.
 
 ---
 

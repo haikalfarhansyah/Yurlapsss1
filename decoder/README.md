@@ -14,7 +14,7 @@ repo YurLaps (private, satu saja)
 │     ├── job test             → uji logika (Linux)
 │     ├── job decoder          → build YurLapsDecoder.exe (Windows/MSYS2)
 │     ├── job build            → mesin + Electron + installer   ← butuh decoder
-│     └── job build-legacy-native → UI Tk (Windows 8/8.1)
+│     └── (jalur Windows 8 sudah dihapus — YurLaps kini Windows 10+)
 ├── decoder/
 │     ├── patch/rename-target.patch     satu-satunya perubahan pada sumber
 │     ├── patch/upstream-ref.txt        versi OpenStint dikunci (v260830.1)
