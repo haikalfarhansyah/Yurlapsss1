@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YurLaps — Practice</title>
+<link rel="icon" type="image/png" href="/static/assets/favicon.png">
+<link rel="apple-touch-icon" href="/static/assets/favicon.png">
+<style>
+  :root{
+    --blue:#009de0; --blue-l:#eaf6fe; --blue-xl:#f5fbff;
+    --ink:#0d2b45; --txt:#2a3a4d; --muted:#8a98aa; --muted2:#a9b5c3;
+    --line:#e7edf4; --line2:#f0f4f9; --bg:#f7f9fc;
+    --ok:#12b76a; --ok-l:#e8f8ef; --warn:#d99a2b; --bad:#e8544c; --bad-l:#fdeeed;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font:14px/1.5 'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;
+    color:var(--txt);background:var(--bg);-webkit-font-smoothing:antialiased}
+  h1,h2{margin:0;color:var(--ink)}
+  button{font:inherit;cursor:pointer;color:inherit}
+  input{font:inherit;color:inherit}
+
+  /* ---------- shell ---------- */
+  .app{display:flex;min-height:100vh}
+  aside{width:190px;background:#fff;border-right:1px solid var(--line2);
+    position:fixed;inset:0 auto 0 0;padding:26px 12px;display:flex;flex-direction:column}
+  .brand{margin:0 10px}
+  .brand img{display:block;width:100%;max-width:150px;height:auto}
+  .tag{margin:2px 11px 26px;font-size:8px;letter-spacing:1.5px;color:var(--muted2)}
+  .tab{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;
+    padding:11px 12px;border-radius:8px;color:#78879a;font-size:13.5px;font-weight:500;
+    margin-bottom:2px;text-align:left}
+  .tab svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7}
+  .tab:hover{background:#f5f8fc}
+  .tab.on{background:var(--blue-l);color:var(--blue);font-weight:600}
+  .aside-foot{margin-top:auto;font-size:10.5px;color:var(--muted2);padding:0 11px}
+  .aside-foot b{display:block;color:var(--muted);font-size:11px;font-weight:600;
+    margin-bottom:2px}
+  .main{margin-left:190px;flex:1;min-width:0;padding:28px 30px 40px;max-width:1240px}
+
+  /* ---------- halaman ---------- */
+  .view{display:none}
+  .view.on{display:block}
+  .head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+  .head h1{font-size:23px;font-weight:600;letter-spacing:-.5px}
+  .link{background:none;border:0;color:var(--muted);font-size:12.5px}
+  .link:hover{color:var(--blue)}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 1px 2px rgba(20,45,70,.04)}
+
+  /* ---------- tabel ---------- */
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th{text-align:left;font-size:9px;letter-spacing:1.1px;text-transform:uppercase;
+    color:var(--muted2);font-weight:700;padding:13px 18px;border-bottom:1px solid var(--line2);
+    white-space:nowrap}
+  td{padding:13px 18px;border-bottom:1px solid var(--line2);font-size:14px}
+  tbody tr:last-child td{border-bottom:0}
+  .pos{width:56px;color:var(--muted2);font-weight:700}
+  .pos.lead{color:var(--blue)}
+  .best{color:var(--blue);font-weight:700}
+  .num{text-align:right}
+  th.num{text-align:right}
+  .foot{display:flex;gap:14px;padding:12px 18px;border-top:1px solid var(--line2);
+    font-size:12px;color:var(--muted)}
+  .foot b{color:var(--ink);font-weight:600}
+  .empty{padding:34px 18px;text-align:center;color:var(--muted);font-size:13px}
+
+  /* nama + id transponder */
+  .who{line-height:1.3}
+  .who .nm{font-weight:600;color:var(--ink);font-size:14px}
+  .who .tid{display:block;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;
+    letter-spacing:.2px;margin-top:1px}
+  .who.unreg{display:flex;align-items:center;gap:9px}
+  .who.unreg .tid{font-size:13.5px;color:var(--ink);font-weight:600;margin:0;letter-spacing:0}
+  .pencil{display:inline-grid;place-items:center;width:28px;height:28px;flex:none;
+    background:var(--blue-xl);border:1px dashed #cfe8f8;border-radius:8px;color:var(--blue);
+    transition:.14s}
+  .pencil:hover{background:var(--blue-l);border-style:solid}
+  .pencil svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8}
+
+  /* ---------- decoder ---------- */
+  .row2{display:grid;grid-template-columns:1.4fr .6fr;gap:16px;margin-bottom:16px}
+  .status{display:flex;align-items:center;gap:14px;padding:20px}
+  .led{width:12px;height:12px;border-radius:50%;background:var(--bad);flex:none;
+    box-shadow:0 0 0 4px var(--bad-l)}
+  .led.on{background:var(--ok);box-shadow:0 0 0 4px var(--ok-l)}
+  .led.wait{background:var(--warn);box-shadow:0 0 0 4px rgba(217,154,43,.16);
+    animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .status b{font-size:16px;color:var(--ink);font-weight:600}
+  .status small{display:block;color:var(--muted);font-size:12px}
+  .metric{padding:20px}
+  .metric label{display:block;font-size:9px;letter-spacing:1.2px;color:var(--muted2);
+    font-weight:700;margin-bottom:6px}
+  .metric b{font-size:30px;font-weight:700;color:var(--ink);letter-spacing:-1.2px;
+    font-variant-numeric:tabular-nums}
+  .metric b small{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:0}
+
+  .gain{padding:20px;margin-bottom:16px}
+  .gain-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+  .gain-top label{font-size:9px;letter-spacing:1.2px;color:var(--muted2);font-weight:700}
+  .gain-val{font-size:30px;font-weight:800;color:var(--ink);letter-spacing:-1.4px;
+    font-variant-numeric:tabular-nums}
+  .gain-val small{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:0}
+  input[type=range]{width:100%;accent-color:var(--blue);height:22px;margin:12px 0 2px}
+  .scale{display:flex;justify-content:space-between;font-size:10px;color:var(--muted2)}
+  .presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+  .presets button{border:1px solid var(--line);background:#fff;border-radius:999px;
+    padding:5px 12px;font-size:12.5px;color:#61758c;font-weight:600}
+  .presets button.on{border-color:var(--blue);color:var(--blue);background:var(--blue-xl)}
+  .hint{font-size:12px;color:var(--muted);margin-top:14px;line-height:1.6}
+
+  table.pass td{font-size:13px;padding:11px 18px}
+  table.pass .id{font-weight:600;color:var(--ink)}
+  table.pass .ts,table.pass .rssi,table.pass .dur{font-variant-numeric:tabular-nums}
+  table.pass th.num,table.pass td.num{text-align:right}
+  .loghead{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:16px 18px 10px}
+  .loghead h2{font-size:14px;font-weight:600}
+  .loghead .hint{margin:0}
+
+  /* ---------- driver ---------- */
+  .idcell{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+  .inp{width:100%;border:1px solid transparent;background:#f8fafd;border-radius:7px;
+    padding:8px 10px;font-size:13.5px}
+  .inp:hover{border-color:var(--line)}
+  .inp:focus{outline:none;background:#fff;border-color:#b7e0f7;box-shadow:0 0 0 3px #eaf7fe}
+  .idw{width:130px}
+  .rowact{display:flex;gap:6px;justify-content:flex-end;flex-wrap:nowrap}
+  .mini{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 12px;
+    font-size:12px;font-weight:600;color:#61758c;white-space:nowrap}
+  .mini.save{border-color:var(--blue);background:var(--blue);color:#fff}
+  .mini.del{color:var(--bad);border-color:#f4d7d4}
+  .mini:hover{filter:brightness(.97)}
+  .inp:disabled{background:transparent;border-color:transparent;color:var(--ink);
+    -webkit-text-fill-color:var(--ink);opacity:1}
+  .inp:disabled.name{font-weight:600}
+  .inp:disabled.empty{color:var(--muted);font-weight:400;font-style:italic}
+  .addbtn{display:inline-flex;align-items:center;gap:7px;background:var(--blue);
+    border:0;color:#fff;border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600}
+
+  /* ---------- dialog ---------- */
+  .modal{position:fixed;inset:0;background:rgba(13,43,69,.28);display:none;
+    align-items:center;justify-content:center;padding:20px;z-index:50}
+  .modal.on{display:flex}
+  .sheet{background:#fff;border-radius:12px;width:min(400px,100%);padding:20px;
+    box-shadow:0 20px 50px rgba(13,43,69,.18)}
+  .sheet h2{font-size:16px;margin-bottom:4px}
+  .sheet p{margin:0 0 14px;color:var(--muted);font-size:12.5px}
+  .field{margin-bottom:10px}
+  .field label{display:block;font-size:9px;letter-spacing:1.1px;color:var(--muted2);
+    font-weight:700;margin-bottom:4px}
+  .field input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:7px;font-size:13px}
+  .field input:focus{outline:none;border-color:#b7e0f7;box-shadow:0 0 0 3px #eaf7fe}
+  .sheet-act{display:flex;gap:8px;margin-top:14px}
+  .btn{flex:1;padding:10px;border-radius:8px;border:1px solid var(--line);background:#fff;
+    font-weight:600;font-size:13px;color:#5f7288}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+
+  .toast{position:fixed;bottom:22px;right:24px;background:#0e2b45;color:#fff;
+    padding:10px 16px;border-radius:9px;font-size:12.5px;font-weight:600;opacity:0;
+    transform:translateY(10px);transition:.2s;pointer-events:none;z-index:60}
+  .toast.on{opacity:1;transform:translateY(0)}
+
+  @media(max-width:760px){
+    aside{position:static;width:auto;flex-direction:row;align-items:center;padding:10px;overflow:auto}
+    .brand{margin:0 8px 0 0}.brand img{max-width:96px}.tag{display:none}
+    .aside-foot{display:none}
+    .tab{width:auto;padding:9px 12px}
+    .app{display:block}.main{margin-left:0;padding:16px}
+    .row2{grid-template-columns:1fr}
+    th,td{padding:11px 12px}
+    .idw{width:90px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><img src="/static/assets/yurlaps-logo.png" alt="YurLaps"></div>
+    <div class="tag">RC TIMING SYSTEM</div>
+    <button class="tab on" data-view="practice">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 17l5-5 3 3 5-6 5 4"/><path d="M3 21h18"/></svg> Practice
+    </button>
+    <button class="tab" data-view="driver">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/>
+        <path d="M16 11h5M18.5 8.5v5"/></svg> Driver
+    </button>
+    <button class="tab" data-view="decoder">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 13a8 8 0 0116 0"/><path d="M7 17a4.5 4.5 0 019 0"/>
+        <circle cx="13" cy="20" r="1.4"/></svg> Decoder
+    </button>
+    <div class="aside-foot">
+      <b id="asideConn">Decoder offline</b>
+      <span id="asideVer">YurLaps v—</span>
+    </div>
+  </aside>
+
+  <div class="main">
+
+    <!-- ============ PRACTICE ============ -->
+    <section class="view on" id="v-practice">
+      <div class="head">
+        <h1>Practice</h1>
+        <button class="link" id="btnCsv">Ekspor CSV</button>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead><tr>
+            <th class="pos">POS</th>
+            <th>PEMBALAP</th>
+            <th class="num">LAP</th>
+            <th class="num">TERAKHIR</th>
+            <th class="num">BEST</th>
+          </tr></thead>
+          <tbody id="board"></tbody>
+        </table>
+        <div class="foot">
+          <span><b id="fDrv">0</b> pembalap</span>
+          <span><b id="fLap">0</b> putaran</span>
+          <span>Best sesi <b id="fBest" style="color:var(--blue)">—</b></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DRIVER ============ -->
+    <section class="view" id="v-driver">
+      <div class="head">
+        <h1>Driver</h1>
+        <button class="addbtn" id="btnAdd">+ Tambah driver</button>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead><tr>
+            <th>TRANSPONDER ID</th>
+            <th>NAMA</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="drivers"></tbody>
+        </table>
+        <div class="foot">
+          <span>Hanya driver yang sudah disimpan tampil di sini. Nama yang disimpan
+            langsung dipakai di Practice.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DECODER ============ -->
+    <section class="view" id="v-decoder">
+      <div class="head"><h1>Decoder</h1></div>
+
+      <div class="row2">
+        <div class="card status">
+          <span class="led" id="led"></span>
+          <div>
+            <b id="connText">Tidak terhubung</b>
+            <small id="connSub">YurLaps Decoder belum terhubung</small>
+          </div>
+        </div>
+        <div class="card metric">
+          <label>NOISE</label>
+          <b id="mNoise">—<small> dBFS</small></b>
+        </div>
+      </div>
+
+      <div class="card gain">
+        <div class="gain-top">
+          <label>GAIN TUNER</label>
+          <div class="gain-val" id="gVal">20<small> dB</small></div>
+        </div>
+        <input type="range" id="gain" min="0" max="49.6" step="0.1" value="20">
+        <div class="scale"><span>0</span><span>10</span><span>20</span><span>30</span>
+          <span>40</span><span>49,6</span></div>
+        <div class="presets" id="presets">
+          <button data-g="0">0</button><button data-g="8.7">8,7</button>
+          <button data-g="16.6">16,6</button><button data-g="20">20</button>
+          <button data-g="28">28</button><button data-g="32">32</button>
+          <button data-g="40">40</button><button data-g="49.6">49,6</button>
+        </div>
+        <div class="hint">Lepas slider → YurLaps Decoder dijalankan ulang dengan gain baru.</div>
+      </div>
+
+      <div class="card">
+        <div class="loghead">
+          <h2>Log aktivitas</h2>
+          <span class="hint">ms sejak YurLaps Decoder dijalankan · 20 lintasan terakhir</span>
+        </div>
+        <table class="pass">
+          <thead><tr>
+            <th>ID</th>
+            <th>TIMESTAMP DECODER (MS)</th>
+            <th class="num">RSSI</th>
+            <th class="num">PASSING</th>
+          </tr></thead>
+          <tbody id="passes"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- dialog nama pembalap -->
+<div class="modal" id="modal">
+  <div class="sheet">
+    <h2 id="mTitle">Tulis nama pembalap</h2>
+    <p id="mSub">Transponder <b id="mTid">—</b></p>
+    <div class="field">
+      <label>NAMA</label>
+      <input id="mName" autocomplete="off" placeholder="mis. Budi Santoso">
+    </div>
+    <div class="sheet-act">
+      <button class="btn" id="mCancel">Batal</button>
+      <button class="btn primary" id="mSave">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+   YurLaps UI — vanilla JS, tanpa dependensi eksternal.
+   Data dari /api/state (SSE /api/events) + aksi ke endpoint yang ada.
+   ========================================================================= */
+const $ = (s) => document.querySelector(s);
+/* Token akses (kalau dipasang) diterima lewat ?t=… sekali, lalu ditukar jadi
+   cookie HttpOnly supaya tidak tertinggal di riwayat/URL saat pindah halaman. */
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const URL_TOKEN = '';
+
+let state = null;
+const sel = { view: 'practice', editRow: null, draft: null, modalTid: null };
+
+/* ---------------- util ---------------- */
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+/* Waktu lap: format klasik m:ss.mmm — dipakai di tabel Practice. */
+const fmtLap = (ms) => {
+  if (ms == null || ms < 0) return '—';
+  const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), t = ms % 1000;
+  return m > 0 ? `${m}:${String(s).padStart(2, '0')}.${String(t).padStart(3, '0')}`
+               : `${s}.${String(t).padStart(3, '0')}`;
+};
+const fmtNum = (v, d = 2) => (v == null ? '—'
+  : Number(v).toFixed(d).replace('.', ','));
+/* Timestamp decoder apa adanya: milidetik sejak YurLaps Decoder dijalankan. */
+const tsRaw = (ms) => (ms == null ? '—' : `${ms} ms`);
+
+function toast(msg, bad) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.style.background = bad ? '#a3302a' : '#0e2b45';
+  t.classList.add('on');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('on'), 2200);
+}
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-YurLaps-Token': TOKEN },
+    body: JSON.stringify(body),
+  };
+  const res = await fetch(path + URL_TOKEN, opt);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/* ---------------- navigasi ---------------- */
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('on'));
+    document.querySelectorAll('.view').forEach((v) => v.classList.remove('on'));
+    tab.classList.add('on');
+    sel.view = tab.dataset.view;
+    $('#v-' + sel.view).classList.add('on');
+    document.title = 'YurLaps — ' + tab.textContent.trim();
+  };
+});
+
+/* ---------------- data turunan ---------------- */
+function driversSorted() {
+  const list = (state?.drivers || []).slice();
+  list.sort((a, b) => {
+    const ab = a.best_ms == null ? Infinity : a.best_ms;
+    const bb = b.best_ms == null ? Infinity : b.best_ms;
+    if (ab !== bb) return ab - bb;
+    return (b.total_laps || 0) - (a.total_laps || 0);
+  });
+  return list;
+}
+function sessionBest() {
+  const b = driversSorted().filter((d) => d.best_ms != null);
+  return b.length ? b[0].best_ms : null;
+}
+function totalLaps() {
+  return (state?.drivers || []).reduce((n, d) => n + (d.total_laps || 0), 0);
+}
+
+/* ---------------- Practice ---------------- */
+function renderPractice() {
+  const rows = driversSorted();
+  const body = $('#board');
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="5" class="empty">
+      Belum ada lintasan. Begitu transponder lewat, namanya langsung muncul di sini.</td></tr>`;
+  } else {
+    body.innerHTML = rows.map((d, i) => {
+      const named = !!(d.driver || '').trim();
+      const who = named
+        ? `<span class="nm">${esc(d.driver)}</span><small class="tid">${d.transponder_id}</small>`
+        : `<span class="tid">${d.transponder_id}</span>
+           <button class="pencil" data-nama="${d.transponder_id}"
+             title="Tulis nama pembalap" aria-label="Tulis nama pembalap">
+             <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+               <path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg></button>`;
+      return `<tr>
+        <td class="pos${i === 0 ? ' lead' : ''}">${i + 1}</td>
+        <td><div class="who${named ? '' : ' unreg'}">${who}</div></td>
+        <td class="num">${d.total_laps || 0}</td>
+        <td class="num">${fmtLap(d.last_ms)}</td>
+        <td class="num best">${fmtLap(d.best_ms)}</td>
+      </tr>`;
+    }).join('');
+    body.querySelectorAll('.pencil').forEach((b) => {
+      b.onclick = () => openNameModal(Number(b.dataset.nama), '');
+    });
+  }
+  $('#fDrv').textContent = rows.length;
+  $('#fLap').textContent = totalLaps();
+  $('#fBest').textContent = fmtLap(sessionBest());
+}
+
+/* ---------------- Driver ---------------- */
+function openNameModal(tid, current) {
+  sel.modalTid = tid;
+  $('#mTid').textContent = tid;
+  $('#mName').value = current || '';
+  $('#modal').classList.add('on');
+  setTimeout(() => $('#mName').focus(), 40);
+}
+function closeModal() { $('#modal').classList.remove('on'); sel.modalTid = null; }
+
+async function saveName(tid, name) {
+  await api('/api/driver', { transponder_id: tid, driver: name });
+  toast('Nama disimpan');
+  await refresh();
+}
+
+function renderDrivers() {
+  const rows = driversSorted();
+  const list = rows.slice();
+  if (sel.draft) list.push({ ...sel.draft, __draft: true });   // baris tambah sementara
+  const body = $('#drivers');
+
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="3" class="empty">
+      Belum ada driver tersimpan. Klik <b>+ Tambah driver</b> atau tekan ikon pensil
+      di menu Practice.</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = list.map((d) => {
+    const editing = d.__draft ? true : sel.editRow === d.transponder_id;
+    const named = !!(d.driver || '').trim();
+    const idInp = editing
+      ? `<input class="inp idw" data-f="tid" value="${esc(d.transponder_id)}"
+           inputmode="numeric" placeholder="ID">`
+      : `<span class="idcell">${d.transponder_id === '' ? '—' : d.transponder_id}</span>`;
+    const nameInp = editing
+      ? `<input class="inp" data-f="name" value="${esc(d.driver || '')}"
+           placeholder="Nama pembalap">`
+      : `<input class="inp name${named ? '' : ' empty'}" disabled
+           value="${esc(named ? d.driver : 'Belum ada nama')}">`;
+    const acts = editing
+      ? `<button class="mini save" data-act="save">Simpan</button>
+         <button class="mini" data-act="cancel">Batal</button>`
+      : `<button class="mini" data-act="edit">Edit</button>
+         <button class="mini del" data-act="del">Hapus</button>`;
+    const rowKey = d.__draft ? '__draft__' : d.transponder_id;
+    return `<tr data-row="${esc(rowKey)}">
+      <td>${idInp}</td>
+      <td>${nameInp}</td>
+      <td><div class="rowact">${acts}</div></td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('tr').forEach((tr) => {
+    const key = tr.dataset.row;                       // angka atau '__draft__'
+    tr.querySelectorAll('[data-act]').forEach((btn) => {
+      btn.onclick = () => driverAction(btn.dataset.act, key, tr);
+    });
+    tr.querySelectorAll('input[data-f]').forEach((inp) => {
+      inp.onkeydown = (e) => {
+        if (e.key === 'Enter') driverAction('save', key, tr);
+        if (e.key === 'Escape') driverAction('cancel', key, tr);
+      };
+    });
+  });
+}
+
+async function driverAction(act, key, tr) {
+  const isDraft = key === '__draft__';
+  const tid = isDraft ? NaN : Number(key);
+  if (act === 'edit') {
+    sel.editRow = tid;
+    renderDrivers();
+    const inp = document.querySelector(`tr[data-row="${tid}"] input[data-f="name"]`);
+    if (inp) { inp.focus(); inp.select(); }
+    return;
+  }
+  if (act === 'cancel') {
+    if (isDraft || sel.draft) sel.draft = null;
+    sel.editRow = null;
+    renderDrivers();
+    return;
+  }
+  if (act === 'del') {
+    if (isDraft) { sel.draft = null; sel.editRow = null; renderDrivers(); return; }
+    const d = (state.drivers || []).find((x) => x.transponder_id === tid);
+    const label = d && d.driver ? d.driver : `#${tid}`;
+    if (!confirm(`Hapus pemetaan ${label}?\nLap yang sudah tercatat tetap tersimpan.`)) return;
+    try {
+      await api('/api/driver/delete', { transponder_id: tid });
+      toast('Driver dihapus');
+      await refresh();
+    } catch (e) { toast('Gagal menghapus: ' + e.message, true); }
+    return;
+  }
+  if (act === 'save') {
+    const inputs = tr.querySelectorAll('input[data-f]');
+    let newTid, name;
+    inputs.forEach((i) => {
+      if (i.dataset.f === 'tid') newTid = i.value.trim();
+      if (i.dataset.f === 'name') name = i.value.trim();
+    });
+    if (!newTid || !/^\d+$/.test(newTid)) { toast('Transponder ID harus angka', true); return; }
+    if (!name) { toast('Nama pembalap belum diisi', true); return; }
+    const dupe = (state.drivers || []).some(
+      (d) => String(d.transponder_id) === newTid
+             && (isDraft || String(d.transponder_id) !== String(tid)));
+    if (dupe) { toast(`ID ${newTid} sudah dipakai driver lain`, true); return; }
+    try {
+      await api('/api/driver', { transponder_id: Number(newTid), driver: name });
+      sel.draft = null;
+      sel.editRow = null;
+      toast('Driver disimpan');
+      await refresh();
+    } catch (e) { toast('Gagal menyimpan: ' + e.message, true); }
+  }
+}
+
+/* ---------------- Decoder ---------------- */
+function paintGain(value) {
+  const g = Number(value) || 0;
+  $('#gVal').innerHTML = `${String(g).replace('.', ',')}<small> dB</small>`;
+  $('#gain').value = g;
+  document.querySelectorAll('#presets button').forEach((b) => {
+    b.classList.toggle('on', Math.abs(Number(b.dataset.g) - g) < 0.05);
+  });
+}
+
+function renderDecoder() {
+  const dec = state?.decoder || {};
+  const mgr = dec.manager || {};
+  const online = !!dec.online;
+  const waiting = mgr.state === 'waiting' || /menunggu/i.test(mgr.message || '');
+  const led = $('#led');
+  led.className = 'led' + (online ? ' on' : (waiting ? ' wait' : ''));
+  $('#connText').textContent = online ? 'Terhubung'
+    : (waiting ? 'Menunggu YurLaps Decoder' : 'Tidak terhubung');
+  $('#connSub').textContent = online
+    ? `${dec.name || 'YurLaps Decoder'} · ${dec.endpoint || ''}`
+    : (mgr.message || 'YurLaps Decoder belum terhubung · mencoba tiap 1,5 detik');
+
+  const noise = (dec.noise_history || []).length
+    ? dec.noise_history[dec.noise_history.length - 1].noise : null;
+  $('#mNoise').innerHTML = `${noise == null ? '—' : fmtNum(noise, 1)}<small> dBFS</small>`;
+
+  const passes = (dec.passes || []).slice(-20).reverse();
+  const body = $('#passes');
+  if (!passes.length) {
+    body.innerHTML = `<tr><td colspan="4" class="empty">
+      Belum ada lintasan. Log ini terisi begitu YurLaps Decoder mengirim data.</td></tr>`;
+  } else {
+    body.innerHTML = passes.map((p) => {
+      const named = !!(p.driver || '').trim();
+      const who = named ? `${p.transponder_id} · ${esc(p.driver)}` : `${p.transponder_id}`;
+      const dur = p.pass_duration_us == null ? '—' : fmtNum(p.pass_duration_us / 1000, 1) + ' ms';
+      return `<tr>
+        <td class="id">${who}</td>
+        <td class="ts">${tsRaw(p.decoder_timecode)}</td>
+        <td class="rssi num">${fmtNum(p.rssi)}</td>
+        <td class="dur num">${dur}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  const g = state?.settings?.decoder_gain;
+  if (document.activeElement !== $('#gain')) paintGain(g == null ? 20 : g);
+}
+
+/* ---------------- render & sinkron ---------------- */
+function renderAll() {
+  if (!state) return;
+  $('#asideVer').textContent = 'YurLaps v' + (state.app?.version || '—');
+  $('#asideConn').textContent = state.decoder?.online ? 'Decoder terhubung' : 'Decoder offline';
+  renderPractice();
+  renderDrivers();
+  renderDecoder();
+}
+
+async function refresh() {
+  try {
+    state = await api('/api/state');
+    renderAll();
+  } catch (e) {
+    $('#asideConn').textContent = 'Tidak bisa memuat data';
+  }
+}
+
+function connectSSE() {
+  const es = new EventSource('/api/events' + URL_TOKEN);
+  es.onmessage = (ev) => {
+    let m;
+    try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.kind === 'hello') { state = m.state; renderAll(); return; }
+    if (m.state) { state = m.state; renderAll(); return; }
+    refresh();                       // event kecil (passing/lap): ambil snapshot
+  };
+  es.onerror = () => { es.close(); setTimeout(connectSSE, 2500); };
+}
+
+/* ---------------- aksi ---------------- */
+$('#btnCsv').onclick = () => {
+  location.href = '/api/export.csv' + URL_TOKEN;
+};
+
+$('#btnAdd').onclick = () => {
+  if (sel.draft) { toast('Selesaikan baris yang sedang diedit dulu', true); return; }
+  sel.draft = { transponder_id: '', driver: '', total_laps: 0, best_ms: null, last_ms: null };
+  sel.editRow = '__draft__';
+  renderDrivers();
+  const rows = document.querySelectorAll('#drivers tr');
+  const last = rows[rows.length - 1];
+  const inp = last && last.querySelector('input[data-f="tid"]');
+  if (inp) inp.focus();
+};
+
+$('#mCancel').onclick = closeModal;
+$('#mSave').onclick = async () => {
+  const name = $('#mName').value.trim();
+  if (!name) { toast('Nama belum diisi', true); return; }
+  const tid = sel.modalTid;
+  closeModal();
+  try { await saveName(tid, name); } catch (e) { toast('Gagal: ' + e.message, true); }
+};
+$('#mName').onkeydown = (e) => { if (e.key === 'Enter') $('#mSave').click(); };
+$('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
+
+let gainTimer = null;
+function sendGain(value) {
+  clearTimeout(gainTimer);
+  gainTimer = setTimeout(async () => {
+    try {
+      await api('/api/decoder/gain', { gain: Number(value) });
+      toast(`Gain ${String(value).replace('.', ',')} dB · decoder dijalankan ulang`);
+      await refresh();
+    } catch (e) { toast('Gagal mengubah gain: ' + e.message, true); }
+  }, 350);
+}
+$('#gain').oninput = (e) => paintGain(e.target.value);
+$('#gain').onchange = (e) => sendGain(e.target.value);
+document.querySelectorAll('#presets button').forEach((b) => {
+  b.onclick = () => { paintGain(b.dataset.g); sendGain(b.dataset.g); };
+});
+
+/* ---------------- start ---------------- */
+(async () => {
+  if (TOKEN) {
+    try {
+      await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: TOKEN }),
+      });
+    } catch (e) { /* biarkan: kalau gagal, token tetap dipakai di header */ }
+    history.replaceState(null, '', location.pathname);
+  }
+})();
+refresh();
+connectSSE();
+setInterval(refresh, 4000);      // cadangan kalau SSE terputus
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# Dependensi wajib (dipakai .exe maupun saat menjalankan dari source)
+pyzmq==27.2.0
+
+# Opsional: hanya kalau ingin jendela native pywebview saat menjalankan dari
+# source (python -m app --desktop). TIDAK dipakai oleh StintLab.exe.
+# pywebview==5.4 ; sys_platform == "win32"
