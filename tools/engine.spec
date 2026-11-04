@@ -1,0 +1,79 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""Spec PyInstaller untuk MESIN YurLaps (dipakai jendela Electron).
+
+Beda dengan stintlab.spec (yang membangun aplikasi Tk lengkap):
+  * tanpa Tkinter  -> tidak ada UI yang digambar proses ini
+  * console=True   -> stdout dipakai untuk memberi tahu port ke Electron
+  * nama YurLapsEngine.exe, ditaruh di desktop/engine/ lalu dibundel
+    electron-builder ke resources/engine/
+
+Build:  python -m PyInstaller tools/engine.spec
+"""
+from pathlib import Path
+
+ROOT = Path(SPECPATH).resolve()          # .../tools
+PROJECT = ROOT.parent                    # .../stintlab
+ASSETS = PROJECT / "assets"
+OUT = PROJECT / "desktop" / "engine"
+
+a = Analysis(
+    [str(ROOT / "engine_entry.py")],
+    pathex=[str(PROJECT)],
+    binaries=[],
+    # UI web (index.html + aset) HARUS ikut: jendela Electron memuatnya dari
+    # server lokal. Tanpa ini aplikasi hasil build menampilkan 404.
+    datas=[
+        (str(PROJECT / "app" / "static"), "app/static"),
+        (str(ASSETS / "yurlaps-logo.png"), "assets"),
+    ],
+    hiddenimports=[
+        "app.webapp",
+        "app.native",          # diimpor oleh modul main walau tidak dipakai
+        "app.devices",
+        "app.updater",
+        "zmq",
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    # Jendela aplikasi ditangani Electron: Tk, webview, pythonnet dibuang.
+    excludes=[
+        "tkinter", "_tkinter", "PIL", "Pillow",
+        "webview", "clr", "pythonnet", "clr_loader", "System",
+        "matplotlib", "numpy", "pandas", "scipy",
+        "test", "unittest",
+    ],
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="YurLapsEngine",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="YurLapsEngine",
+)
+
+# Salin hasil ke tempat yang dicari electron-builder (extraResources: engine/)
+import shutil  # noqa: E402
+
+target = OUT
+if target.exists():
+    shutil.rmtree(target)
+shutil.copytree(Path(DISTPATH) / "YurLapsEngine", target)
+print(f"[engine] mesin disalin ke {target}")
