@@ -619,12 +619,23 @@ function renderAll() {
   renderDecoder();
 }
 
+let refreshTimer = null, refreshFails = 0;
+
 async function refresh() {
   try {
     state = await api('/api/state');
+    refreshFails = 0;
     renderAll();
   } catch (e) {
-    $('#asideConn').textContent = 'Tidak bisa memuat data';
+    // Jangan menyerah pada kegagalan pertama: saat aplikasi baru dinyalakan
+    // mesin bisa belum siap sepersekian detik. Coba lagi sebentar lagi.
+    refreshFails++;
+    $('#asideConn').textContent = refreshFails > 3
+      ? 'Tidak bisa memuat data'
+      : 'Menyambungkan…';
+    if (!refreshTimer && refreshFails <= 30) {
+      refreshTimer = setTimeout(() => { refreshTimer = null; refresh(); }, 700);
+    }
   }
 }
 

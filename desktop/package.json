@@ -1,0 +1,70 @@
+{
+  "name": "yurlaps-desktop",
+  "productName": "YurLaps",
+  "version": "0.3.0",
+  "description": "YurLaps - jendela aplikasi (Electron) untuk mesin timing YurLaps",
+  "main": "src/main/index.js",
+  "author": "YurLaps",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "electron-builder --win --x64 --publish never",
+    "dist:dir": "electron-builder --win --x64 --dir --publish never",
+    "dist:linux": "electron-builder --linux dir --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "id.yurlaps.desktop",
+    "productName": "YurLaps",
+    "artifactName": "YurLaps-Setup-${version}.${ext}",
+    "directories": {
+      "output": "../dist-electron",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/yurlaps.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "extraResources": [
+      {
+        "from": "engine",
+        "to": "engine",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "YurLaps",
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer-hooks.nsh"
+    }
+  }
+}

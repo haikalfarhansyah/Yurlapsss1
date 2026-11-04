@@ -1,91 +1,53 @@
-name: Build Windows EXE
+name: Build Windows
 
 on:
   push:
-    branches: [main, master]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
-      version:
-        description: "Versi rilis (contoh: 0.2.0). Kosong = pakai versi di kode."
-        required: false
-        default: ""
       make_installer:
-        description: "Buat installer .exe (butuh Inno Setup)"
+        description: "Buat installer juga"
         type: boolean
         default: true
-      base_url:
-        description: "URL folder unggahan untuk update.json (opsional)"
-        required: false
-        default: ""
+
+permissions:
+  contents: read
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1) TES — cepat (~1 menit). Kalau ini merah, build tidak dijalankan.
+  # 1. Tes logika (Linux, cepat)
   # ---------------------------------------------------------------------------
   test:
-    name: Tes
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-
-      # Repo bisa berisi kode di root ATAU di dalam subfolder (mis. stintlab/).
-      # Langkah ini mencari lokasinya supaya semua langkah berikut tidak perlu
-      # diubah kalau struktur foldernya berbeda.
-      - name: Deteksi folder proyek
-        id: detect
-        shell: bash
-        run: |
-          root="."
-          if [ ! -f "$root/stintlab.spec" ]; then
-            found=$(find . -maxdepth 3 -name stintlab.spec -printf '%h\n' 2>/dev/null | head -1)
-            if [ -n "$found" ]; then root="$found"; fi
-          fi
-          echo "Proyek ditemukan di: $root"
-          ls -la "$root" | head -20
-          echo "root=$root" >> "$GITHUB_OUTPUT"
-
-      - name: Info lingkungan (untuk diagnosis kalau ada yang gagal)
-        working-directory: ${{ steps.detect.outputs.root }}
-        run: |
-          python -c "import sys,platform;print('Python',sys.version);print(platform.platform())"
-          python -m pip --version
-
       - name: Install dependensi
-        working-directory: ${{ steps.detect.outputs.root }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyzmq flask
-
-      # Berhenti lebih awal dengan pesan jelas kalau ada file yang masih versi
-      # lama (penyebab paling sering: file gagal tertimpa saat push).
-      - name: Verifikasi versi file
-        working-directory: ${{ steps.detect.outputs.root }}
+        run: pip install pyzmq flask pyinstaller
+      - name: Verifikasi kelengkapan file
         run: python tools/verifikasi_file.py
-
-      - name: Tes logika timing & penyimpanan
-        working-directory: ${{ steps.detect.outputs.root }}
+      - name: Tes logika timing & storage
         run: python tests/test_smoke.py
-
-      - name: Tes API & sinkronisasi online
-        working-directory: ${{ steps.detect.outputs.root }}
+        env:
+          YURLAPS_DATA: ${{ runner.temp }}/yl-smoke
+      - name: Tes integrasi REST + SSE
         run: python tests/test_integration.py
-
-      - name: Tes supervisor decoder & pembaruan
-        working-directory: ${{ steps.detect.outputs.root }}
+        env:
+          YURLAPS_DATA: ${{ runner.temp }}/yl-int
+      - name: Tes supervisor decoder + updater
         run: python tests/test_manager.py
+        env:
+          YURLAPS_DATA: ${{ runner.temp }}/yl-man
 
   # ---------------------------------------------------------------------------
-  # 2) BUILD — menghasilkan portable zip, installer, dan update.json
+  # 2. Build Windows: mesin Python + jendela Electron
   # ---------------------------------------------------------------------------
   build:
-    name: Build EXE
     needs: test
     runs-on: windows-latest
     steps:
@@ -95,120 +57,162 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Deteksi folder proyek
         id: detect
-        shell: bash
+        shell: pwsh
         run: |
-          root="."
-          if [ ! -f "$root/stintlab.spec" ]; then
-            found=$(find . -maxdepth 3 -name stintlab.spec -printf '%h\n' 2>/dev/null | head -1)
-            if [ -n "$found" ]; then root="$found"; fi
-          fi
-          echo "Proyek ditemukan di: $root"
-          echo "root=$root" >> "$GITHUB_OUTPUT"
+          $root = "."
+          if (Test-Path "stintlab/stintlab.spec") { $root = "stintlab" }
+          "root=$root" >> $env:GITHUB_OUTPUT
+          Write-Host "Folder proyek: $root"
 
-      - name: Install dependensi
+      - name: Install dependensi Python
         working-directory: ${{ steps.detect.outputs.root }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyzmq pyinstaller
+        run: pip install -r requirements.txt pyinstaller
 
       - name: Ambil komponen pihak ketiga (Zadig + OpenStint)
         working-directory: ${{ steps.detect.outputs.root }}
         run: python tools/fetch_vendor.py
         continue-on-error: true        # aplikasi tetap bisa dibangun tanpanya
 
-      - name: Build EXE
+      # ---- 2a. Mesin (tanpa Tk, dipanggil jendela Electron) ----
+      - name: Build mesin YurLapsEngine.exe
         working-directory: ${{ steps.detect.outputs.root }}
-        run: pyinstaller --noconfirm --clean stintlab.spec
+        run: pyinstaller --noconfirm --clean tools/engine.spec
 
-      - name: Uji EXE native (jendela Tk muncul, tanpa port)
-        working-directory: ${{ steps.detect.outputs.root }}
-        shell: pwsh
-        run: |
-          $env:YURLAPS_DATA = "$env:RUNNER_TEMP\yl-native"
-          $p = Start-Process -FilePath "dist\YurLaps\YurLaps.exe" `
-               -ArgumentList "--native" -PassThru
-          Start-Sleep -Seconds 15
-          if ($p.HasExited) {
-            throw "YurLaps.exe keluar sendiri (crash?) - kode $($p.ExitCode)"
-          }
-          $wins = Get-Process -Id $p.Id | Select-Object -ExpandProperty MainWindowTitle
-          Write-Host "JENDELA:" $wins
-          if (-not $wins) { throw "Jendela aplikasi tidak muncul" }
-          Stop-Process -Id $p.Id -Force
-
-      # Catatan: blok run di YAML tidak perlu escape kutip ganda. Menulis
-      # backslash + kutip justru membuat PowerShell gagal parse (sudah kejadian).
-      - name: Uji EXE mode web (health + UI untuk HP/TV)
+      - name: Pastikan UI ikut di dalam mesin
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
         run: |
-          $env:YURLAPS_DATA = "$env:RUNNER_TEMP\yl-health"
-          $p = Start-Process -FilePath "dist\YurLaps\YurLaps.exe" `
-               -ArgumentList "--web","--no-browser","--port","8098" -PassThru
-          Start-Sleep -Seconds 12
-          try {
-            $r = Invoke-WebRequest -Uri "http://127.0.0.1:8098/api/health" -UseBasicParsing -TimeoutSec 10
-            Write-Host "HEALTH:" $r.Content
-            $u = Invoke-WebRequest -Uri "http://127.0.0.1:8098/" -UseBasicParsing -TimeoutSec 10
-            $html = $u.Content
-            $menuPractice = 'data-view="practice"'
-            $menuDecoder = 'data-view="decoder"'
-            if (-not $html.Contains($menuPractice) -or -not $html.Contains($menuDecoder)) {
-              throw "UI web tidak lengkap (menu Practice/Decoder tidak ditemukan)"
-            }
-            Write-Host "UI web: Practice + Decoder OK"
-          } finally {
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path "desktop\engine\_internal\app\static\index.html")) {
+            throw "UI web (app/static) tidak ikut dibundel - mesin akan menampilkan 404"
           }
+          Write-Host "OK: UI ada di dalam bundel mesin"
 
-      - name: Zip versi portable
+      - name: Uji mesin mengirim port (protokol ke Electron)
         working-directory: ${{ steps.detect.outputs.root }}
-        run: Compress-Archive -Path dist/YurLaps/* -DestinationPath dist/YurLaps-portable.zip
+        shell: pwsh
+        run: |
+          $env:YURLAPS_DATA = "$env:RUNNER_TEMP\yl-engine"
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = "desktop\engine\YurLapsEngine.exe"
+          $psi.Arguments = "--electron"
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardInput = $true
+          $psi.UseShellExecute = $false
+          $p = [System.Diagnostics.Process]::Start($psi)
+          $line = $p.StandardOutput.ReadLine()
+          Write-Host "BARIS PERTAMA:" $line
+          if (-not $line.Contains('"event": "ready"')) { throw "mesin tidak mengirim ready" }
+          $p.StandardInput.Close()
+          if (-not $p.WaitForExit(20000)) { $p.Kill(); throw "mesin tidak berhenti saat stdin ditutup" }
+          Write-Host "OK: mesin siap dan berhenti rapi"
 
+      # ---- 2b. Jendela Electron ----
+      - name: Install dependensi Node (Electron)
+        working-directory: ${{ steps.detect.outputs.root }}/desktop
+        run: npm ci
+
+      - name: Uji jendela Electron (mesin + UI + preload)
+        working-directory: ${{ steps.detect.outputs.root }}/desktop
+        env:
+          YURLAPS_PYTHON: python
+        run: npx electron test/smoke.js
+
+      - name: Build installer Electron (NSIS + portable)
+        working-directory: ${{ steps.detect.outputs.root }}/desktop
+        run: npm run dist
+
+      # ---- 2c. Installer Inno (jalur pembaruan /UPDATEZIP) ----
       - name: Install Inno Setup
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.make_installer }}
+        shell: pwsh
         run: |
           choco install innosetup --no-progress -y
           echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
 
-      - name: Verifikasi hasil build
+      - name: Siapkan folder dist untuk Inno
         working-directory: ${{ steps.detect.outputs.root }}
+        shell: pwsh
         run: |
-          Get-ChildItem dist\YurLaps | Select-Object -First 12 Name, Length
-          if (-not (Test-Path "dist\YurLaps\YurLaps.exe")) {
-            throw "dist\YurLaps\YurLaps.exe tidak ditemukan - build PyInstaller gagal?"
-          }
+          New-Item -ItemType Directory -Force dist\YurLaps | Out-Null
+          Copy-Item dist-electron\win-unpacked\* dist\YurLaps\ -Recurse -Force
+          if (-not (Test-Path "dist\YurLaps\YurLaps.exe")) { throw "dist\YurLaps\YurLaps.exe tidak ada" }
 
-      - name: Build installer
+      - name: Build installer Inno (YurLaps-Setup untuk pembaruan)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.make_installer }}
         working-directory: ${{ steps.detect.outputs.root }}
+        shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\stintlab.iss
+          if (-not (Test-Path "dist\YurLaps-Setup-*.exe")) { throw "installer Inno gagal" }
 
       - name: Siapkan manifest pembaruan (update.json)
         working-directory: ${{ steps.detect.outputs.root }}
-        shell: bash
-        run: |
-          args="--dir dist --out dist/update.json"
-          [ -n "${{ inputs.version }}" ] && args="$args --version ${{ inputs.version }}"
-          [ -n "${{ inputs.base_url }}" ] && args="$args --base-url ${{ inputs.base_url }}"
-          python tools/buat_update_manifest.py $args
-          echo "---- isi update.json ----"
-          cat dist/update.json
+        run: python tools/buat_update_manifest.py
 
       - name: Ringkasan artefak
         working-directory: ${{ steps.detect.outputs.root }}
+        shell: pwsh
         run: |
-          Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize
+          Get-ChildItem dist-electron | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+          Get-ChildItem dist -Filter *.exe | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
 
       - uses: actions/upload-artifact@v7
         with:
-          name: YurLaps-windows
+          name: YurLaps-Windows
           path: |
-            ${{ steps.detect.outputs.root }}/dist/YurLaps-portable.zip
-            ${{ steps.detect.outputs.root }}/dist/YurLaps-Setup-*.exe
-            ${{ steps.detect.outputs.root }}/dist/update.json
-          retention-days: 30
-          if-no-files-found: error
+            ${{ steps.detect.outputs.root }}/dist-electron/*.exe
+            ${{ steps.detect.outputs.root }}/dist-electron/*.zip
+            ${{ steps.detect.outputs.root }}/dist/*.exe
+            ${{ steps.detect.outputs.root }}/dist/*.json
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 3. Mode Tk lama (Windows 8/8.1): tetap dibangun sebagai alternatif
+  # ---------------------------------------------------------------------------
+  build-legacy-native:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Deteksi folder proyek
+        id: detect
+        shell: pwsh
+        run: |
+          $root = "."
+          if (Test-Path "stintlab/stintlab.spec") { $root = "stintlab" }
+          "root=$root" >> $env:GITHUB_OUTPUT
+      - name: Install dependensi
+        working-directory: ${{ steps.detect.outputs.root }}
+        run: pip install -r requirements.txt pyinstaller
+      - name: Build EXE native Tk (Windows 8/8.1)
+        working-directory: ${{ steps.detect.outputs.root }}
+        run: pyinstaller --noconfirm --clean stintlab.spec
+      - name: Uji jendela Tk muncul
+        working-directory: ${{ steps.detect.outputs.root }}
+        shell: pwsh
+        run: |
+          $env:YURLAPS_DATA = "$env:RUNNER_TEMP\yl-native"
+          $p = Start-Process -FilePath "dist\YurLaps\YurLaps.exe" -ArgumentList "--native" -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { throw "YurLaps.exe keluar sendiri (kode $($p.ExitCode))" }
+          $wins = Get-Process -Id $p.Id | Select-Object -ExpandProperty MainWindowTitle
+          Write-Host "JENDELA:" $wins
+          if (-not $wins) { throw "Jendela Tk tidak muncul" }
+          Stop-Process -Id $p.Id -Force
+      - name: Zip versi portable (Tk)
+        working-directory: ${{ steps.detect.outputs.root }}
+        run: Compress-Archive -Path dist/YurLaps/* -DestinationPath dist/YurLaps-portable.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: YurLaps-Windows-Tk
+          path: ${{ steps.detect.outputs.root }}/dist/YurLaps-portable.zip
+          if-no-files-found: warn

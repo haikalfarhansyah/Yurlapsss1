@@ -89,6 +89,21 @@ class YurLaps:
         self._hint_lan(real_port)
         return host, real_port
 
+    def start_electron(self) -> tuple[str, int]:
+        """Mesin + decoder + server HTTP lokal untuk jendela Electron.
+
+        Server hanya mengikat 127.0.0.1 di port acak (0 = pilih otomatis),
+        sehingga tidak ada dialog firewall dan tidak bisa dibuka dari
+        jaringan. Kembalian: (host, port) untuk shell Electron.
+        """
+        self._start_engine()
+        from .webapp import start_server
+
+        self.httpd = start_server(self.ctx, "127.0.0.1", 0, block=False)
+        port = self.httpd.server_address[1]
+        self.engine.log("info", f"Jendela aplikasi: http://127.0.0.1:{port}/")
+        return "127.0.0.1", port
+
     def start_native(self) -> tuple[str, int]:
         """Mesin + decoder saja, tanpa server HTTP (mode native Tkinter).
 
@@ -242,6 +257,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-browser", action="store_true", help="jangan buka browser")
     p.add_argument("--native", action="store_true",
                    help="UI native Tkinter (default; tanpa browser & tanpa server web)")
+    p.add_argument("--electron", action="store_true",
+                   help="dijalankan oleh jendela aplikasi Electron "
+                        "(server lokal 127.0.0.1, port acak)")
     p.add_argument("--web", action="store_true",
                    help="mode web: buka port HTTP untuk HP/TV (default: native)")
     p.add_argument("--desktop", action="store_true", help="buka di jendela aplikasi (pywebview)")
@@ -252,6 +270,56 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--open-folder", action="store_true",
                    help="buka folder data (untuk shortcut)")
     return p
+
+
+def run_electron(args) -> int:
+    """Dijalankan oleh shell Electron (Node) sebagai proses anak.
+
+    Protokolnya sederhana: cetak satu baris JSON berisi port ke stdout, lalu
+    tunggu sampai induk menutup stdin atau mengirim SIGTERM. Tidak ada jendela,
+    tidak ada browser, tidak ada port yang terbuka ke jaringan.
+    """
+    import json
+    import signal
+    import threading
+
+    _safe_console()
+    app = YurLaps(args)
+    host, port = app.start_electron()
+    print(json.dumps({"event": "ready", "host": host, "port": port,
+                      "version": APP_VERSION}), flush=True)
+
+    stop = threading.Event()
+
+    def _on_term(*_a):
+        stop.set()
+
+    try:
+        signal.signal(signal.SIGTERM, _on_term)
+    except Exception:
+        pass
+
+    def _watch_stdin():
+        # Induk menutup stdin saat jendelanya ditutup -> aplikasi berhenti.
+        try:
+            while sys.stdin.readline():
+                pass
+        except Exception:
+            pass
+        stop.set()
+
+    threading.Thread(target=_watch_stdin, name="stdin-watch", daemon=True).start()
+    try:
+        while not stop.wait(0.4):
+            pass
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            app.stop()
+        except Exception:
+            pass
+    return 0
 
 
 def main(argv=None) -> int:
@@ -272,6 +340,10 @@ def main(argv=None) -> int:
 
     # Default saat dijalankan sebagai aplikasi: UI native Tkinter.
     # Mode web tetap tersedia (--web / --browser) untuk TV, HP, dan server.
+    # Shell Electron memanggil: python -m app --electron
+    if getattr(args, "electron", False):
+        return run_electron(args)
+
     wants_web = getattr(args, "web", False) or getattr(args, "browser", False)
     if getattr(args, "native", False) or not wants_web:
         from .native import run_native

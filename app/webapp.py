@@ -15,6 +15,7 @@ import csv
 import io
 import json
 import os
+import sys
 import mimetypes
 import queue
 import threading
@@ -28,7 +29,16 @@ from .config import APP_VERSION, Config
 from .engine import Engine
 from .net import lan_urls
 
-STATIC_DIR = Path(__file__).parent / "static"
+def _static_dir() -> Path:
+    """Folder UI web. Saat dibundel PyInstaller, file UI ada di _internal/app/static."""
+    here = Path(__file__).parent / "static"
+    if here.is_dir():
+        return here
+    base = Path(getattr(sys, "_MEIPASS", "")) / "app" / "static"
+    return base if base.is_dir() else here
+
+
+STATIC_DIR = _static_dir()
 
 
 class EventBus:

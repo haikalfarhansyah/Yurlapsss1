@@ -46,9 +46,14 @@ handicap, sector timing, klasemen multi-sesi.
 
 ## Tampilan
 
-Aplikasi Windows **native** (satu jendela, tanpa browser): UI digambar langsung
-oleh Tkinter yang ikut di dalam Python, jadi tidak butuh WebView2, tidak butuh
-Edge/Chrome, dan tidak membuka port apa pun kecuali kamu memintanya.
+Jendela aplikasi sendiri, seperti aplikasi desktop biasa — **tidak ada browser,
+tidak ada tab, tidak ada address bar**. Chromium dan mesin timing ikut di dalam
+paket, jadi tidak bergantung pada Edge/Chrome yang terpasang di komputer.
+
+Arsitekturnya sama seperti aplikasi timing RC populer (LapBeeps): **jendela
+Electron + mesin Python**. Bedanya, mesin YurLaps hanya mendengarkan di
+`127.0.0.1` dengan port acak — jadi tidak ada dialog firewall dan UI tidak bisa
+dibuka dari komputer lain.
 
 **Semuanya lokal.** Mode native tidak menghubungi internet dan tidak membuka
 port: sinkron ke website mati secara bawaan (dan otomatis tidak jalan selama
@@ -57,7 +62,7 @@ kosong, dan tidak ada server HTTP.
 
 | Jendela aplikasi (`YurLaps.exe`) |
 |---|
-| ![Jendela aplikasi](docs/screenshot-native-exe.png) |
+| ![Jendela aplikasi](docs/screenshot-jendela-aplikasi.png) |
 
 Tiga halaman, semuanya satu layar penuh tanpa panel bertumpuk:
 
@@ -533,9 +538,15 @@ app/
   desktop.py     cadangan: jendela gaya aplikasi via Edge/Chrome (--app-window)
   main.py        entry point CLI
   static/        UI web (satu file HTML) untuk mode --web / HP / TV
+desktop/                   jendela aplikasi (Electron)
+  src/main/index.js        jalankan mesin + buat jendela; matikan mesin saat ditutup
+  src/preload/index.js     jembatan aman (contextIsolation, tanpa Node di UI)
+  test/smoke.js            uji jendela tanpa layar (mesin, UI, preload)
 installer/
-  stintlab.iss             skrip Inno Setup (installer Windows)
+  stintlab.iss             skrip Inno Setup (installer jalur pembaruan)
 tools/
+  engine.spec              bundel mesin (tanpa Tk) untuk jendela Electron
+  engine_entry.py          titik masuk mesin
   fake_decoder.py          decoder OpenStint palsu untuk uji coba
   fetch_vendor.py          unduh Zadig + OpenStint ke vendor/ saat build
   buat_update_manifest.py  hasilkan update.json untuk pembaruan otomatis

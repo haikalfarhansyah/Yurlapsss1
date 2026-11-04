@@ -96,10 +96,7 @@ Filename: "{app}\{#AppExeName}"; Description: "Jalankan {#AppName}"; \
 Type: filesandordirs; Name: "{app}\vendor"
 
 [Code]
-// Hanya komentar "//" yang dipakai di bagian ini.
-// Jangan memakai komentar { ... } di sini: komentar Pascal berakhir pada "}"
-// pertama, sehingga menyebut {param:...} di dalam komentar akan memotong
-// komentarnya dan memunculkan "Syntax error" yang membingungkan.
+// Bagian ini hanya memakai komentar "//".
 
 // Mode pembaruan: aplikasi memanggil installer ini dengan /UPDATEZIP=<file.zip>.
 // Nilainya dibaca lewat konstanta param:UPDATEZIP.
