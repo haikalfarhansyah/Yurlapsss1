@@ -245,6 +245,8 @@ class Updater:
         for cand in candidates:
             if cand.is_file():
                 return ([str(cand), f"/UPDATEZIP={zip_path}"], zip_path)
+            # catatan: installer membaca /UPDATEZIP lewat {param:UPDATEZIP}
+            # (lihat installer/stintlab.iss), sehingga bentuk "/Nilai" aman.
         return None
 
     def apply_and_restart(self) -> tuple[bool, str]:

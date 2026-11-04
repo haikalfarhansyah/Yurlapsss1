@@ -14,7 +14,7 @@
 ;      lalu menjalankan installer ini dengan /UPDATEZIP=<file.zip>, dan installer
 ;      memasang versi tersebut tanpa unduh ulang,
 ;    * menawarkan **pasang driver YurLaps Decoder (WinUSB)** — bisa dilewati,
-;      dan bisa diulang kapan saja dari dalam aplikasi (tombol Perangkat),
+;      dan bisa diulang kapan saja dari dalam aplikasi (halaman Decoder),
 ;    * mendaftarkan YurLaps di "Apps & features" supaya mudah di-uninstall.
 ;
 ;  Yang TIDAK dilakukan installer: menyentuh data pengguna
@@ -63,7 +63,7 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Buat shortcut di Desktop"; GroupDescription: "Shortcut:"
-Name: "installdriver"; Description: "Pasang driver RTL-SDR (WinUSB) — butuh dongle tercolok"; GroupDescription: "Driver SDR:"; Flags: checkedonce
+Name: "installdriver"; Description: "Pasang driver YurLaps Decoder (WinUSB) — butuh perangkat tercolok"; GroupDescription: "YurLaps Decoder:"; Flags: checkedonce
 
 [Files]
 Source: "..\dist\YurLaps\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -77,7 +77,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 [Run]
 ; 1) Pasang driver WinUSB (kalau diminta pengguna)
 Filename: "{app}\vendor\win\wdi-simple.exe"; \
-  Parameters: "--type 0 --name ""YurLaps Decoder"" --manufacturer ""Realtek"" --vid 0x0bda --pid 0x2838 --silent"; \
+  Parameters: "--type 0 --name YurLapsDecoder --manufacturer Realtek --vid 0x0bda --pid 0x2838 --silent"; \
   StatusMsg: "Memasang driver YurLaps Decoder (WinUSB)..."; \
   Flags: runhidden waituntilterminated; Tasks: installdriver; Check: UseWdiSimple
 
@@ -96,33 +96,24 @@ Filename: "{app}\{#AppExeName}"; Description: "Jalankan {#AppName}"; \
 Type: filesandordirs; Name: "{app}\vendor"
 
 [Code]
-{ mode pembaruan: aplikasi memanggil installer ini dengan /UPDATEZIP=<zip> }
-var
-  UpdateZip: String;
-
-function UpdateZipPath(): String;
-var
-  i: Integer;
-  p: String;
+{ Mode pembaruan: aplikasi memanggil installer ini dengan /UPDATEZIP=<zip>.
+  Nilainya dibaca lewat konstanta {param:UPDATEZIP} — tidak perlu loop
+  ParamStr/ParamCount di sini, jadi bagian ini tetap sederhana untuk
+  dikompilasi (bagian yang rumit = sumber error yang sulit dibaca di CI). }
+function UpdateZip: String;
 begin
-  Result := '';
-  for i := 1 to ParamCount do
-  begin
-    p := ParamStr(i);
-    if Pos('/UPDATEZIP=', Uppercase(p)) = 1 then
-      Result := Copy(p, Length('/UPDATEZIP=') + 1, Length(p));
-  end;
+  Result := Trim(ExpandConstant('{param:UPDATEZIP}'));
+end;
+
+{ Kutip satu nilai untuk PowerShell: 'teks' }
+function PsQuote(const S: String): String;
+begin
+  Result := '''' + S + '''';
 end;
 
 function IsUpdateMode(): Boolean;
 begin
-  Result := UpdateZip <> '';
-end;
-
-function InitializeSetup(): Boolean;
-begin
-  UpdateZip := UpdateZipPath();
-  Result := True;
+  Result := UpdateZip() <> '';
 end;
 
 // Entri [Run] hanya dijalankan kalau alatnya benar-benar ikut terpasang.
@@ -132,15 +123,17 @@ begin
   Result := FileExists(ExpandConstant('{app}\vendor\win\wdi-simple.exe'));
 end;
 
-function UseZadigAndNotUpdate: Boolean;
-begin
-  Result := UseZadig() and (not IsUpdateMode());
-end;
-
 function UseZadig: Boolean;
 begin
   Result := (not FileExists(ExpandConstant('{app}\vendor\win\wdi-simple.exe')))
             and FileExists(ExpandConstant('{app}\vendor\win\zadig.exe'));
+end;
+
+function UseZadigAndNotUpdate: Boolean;
+begin
+  // UseZadig() harus sudah dideklarasikan di atas: Pascal Script tidak
+  // mengenal pemanggilan fungsi yang baru muncul belakangan.
+  Result := UseZadig() and (not IsUpdateMode());
 end;
 
 // Catatan: JANGAN memeriksa folder 'dist' di sini.
@@ -156,21 +149,26 @@ end;
 procedure ApplyUpdateZip();
 var
   rc: Integer;
-  tmp, base, cmd: String;
+  tmp, base, zipFile, psFile: String;
 begin
-  if not FileExists(UpdateZip) then
+  zipFile := UpdateZip();
+  if not FileExists(zipFile) then
   begin
-    Log('Zip pembaruan tidak ditemukan: ' + UpdateZip);
+    Log('Zip pembaruan tidak ditemukan: ' + zipFile);
     exit;
   end;
   tmp  := ExpandConstant('{tmp}\yurlaps-update');
   base := ExpandConstant('{app}');
   ForceDirectories(tmp);
-  cmd := 'powershell -NoProfile -ExecutionPolicy Bypass -Command "' +
-         'Add-Type -AssemblyName System.IO.Compression.FileSystem; ' +
-         '[System.IO.Compression.ZipFile]::ExtractToDirectory(' +
-         '''' + UpdateZip + '''' + ', ' + '''' + tmp + '''' + ');"';
-  Exec('cmd.exe', '/c ' + cmd, '', SW_HIDE, ewWaitUntilTerminate, rc);
+  // Skrip PowerShell ditulis ke file dulu lalu dijalankan dengan -File.
+  // Satu baris perintah penuh tanda kutip bertumpuk terlalu mudah salah.
+  psFile := tmp + '\extract.ps1';
+  SaveStringToFile(psFile,
+    'Add-Type -AssemblyName System.IO.Compression.FileSystem' + #13#10 +
+    '[System.IO.Compression.ZipFile]::ExtractToDirectory(' +
+    PsQuote(zipFile) + ', ' + PsQuote(tmp) + ')' + #13#10, False);
+  Exec('powershell', '-NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"',
+       '', SW_HIDE, ewWaitUntilTerminate, rc);
   // robocopy ada di semua Windows 8/8.1/10/11; data pengguna tidak disentuh
   Exec('robocopy', '"' + tmp + '" "' + base + '" /E /R:2 /W:1 /NFL /NDL /NJH /NJS ' +
        '/XD "' + base + '\data" /XF portable.txt', '', SW_HIDE,
@@ -184,7 +182,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     Log('YurLaps ' + '{#AppVersion}' + ' terpasang di ' + ExpandConstant('{app}'));
-    if UpdateZip <> '' then
+    if IsUpdateMode() then
       ApplyUpdateZip();
   end;
 end;

@@ -291,7 +291,9 @@ def install_driver(vid: str = "0x0bda", pid: str = "0x2838",
     cmd = [
         str(exe),
         "--type", "0",                      # 0 = WinUSB
-        "--name", "YurLaps Decoder",
+        # Satu kata, tanpa spasi: nama perangkat muncul di Device Manager/registry
+        # dan dipakai ulang oleh [Run] installer yang tidak bisa memuat kutip.
+        "--name", "YurLapsDecoder",
         "--manufacturer", "Realtek",
         "--vid", _norm_hex(vid),
         "--pid", _norm_hex(pid),

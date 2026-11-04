@@ -153,6 +153,68 @@ def check_workflow_quotes() -> bool:
     return True
 
 
+KEYWORDS = {
+    "if", "then", "else", "begin", "end", "for", "to", "do", "not", "and", "or",
+    "while", "repeat", "until", "case", "of", "function", "procedure", "var",
+    "const", "result", "exit", "div", "mod", "in", "with", "record", "array",
+}
+
+
+def check_installer() -> bool:
+    """Installer dikompilasi ISCC di CI — tidak bisa diuji di sandbox Linux.
+    Jadi periksa hal-hal yang dulu benar-benar membuat build merah:
+
+    * istilah terlarang ("dongle", "RTL-SDR") yang tak boleh muncul di UI,
+    * tanda kutip kosong `""` di dalam Parameters [Run] -> "Mismatched or
+      misplaced quotes",
+    * fungsi [Code] yang dipanggil sebelum dideklarasikan -> "Unknown
+      identifier" (persis seperti UseZadig/UseZadigAndNotUpdate).
+    """
+    path = ROOT / "installer" / "stintlab.iss"
+    if not path.is_file():
+        print("  HILANG  installer/stintlab.iss")
+        return False
+    text = path.read_text(encoding="utf-8", errors="replace")
+    problems = []
+
+    low = text.lower()
+    for word in ("dongle", "rtl-sdr"):
+        if word in low:
+            problems.append(f'kata terlarang "{word}" muncul di installer')
+
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.strip().lower().startswith("parameters:") and '""' in line:
+            problems.append(f"baris {i}: Parameters memuat kutip ganda bersarang")
+
+    if "[Code]" in text:
+        code = text.split("[Code]", 1)[1]
+        defs: dict[str, int] = {}
+        for i, line in enumerate(code.splitlines()):
+            m = re.match(r"\s*(?:function|procedure)\s+(\w+)", line)
+            if m:
+                defs.setdefault(m.group(1).lower(), i)
+        for i, line in enumerate(code.splitlines()):
+            if re.match(r"\s*(?:function|procedure)\s+", line):
+                continue
+            for name in re.findall(r"(\w+)\s*\(", line):
+                key = name.lower()
+                if key in KEYWORDS or key not in defs:
+                    continue
+                if defs[key] > i:
+                    problems.append(
+                        f"[Code] '{name}' dipanggil sebelum dideklarasikan "
+                        f"(pindahkan fungsinya ke atas)")
+        if "param:UPDATEZIP" not in text:
+            problems.append("[Code] /UPDATEZIP tidak dibaca lewat {param:UPDATEZIP}")
+
+    if problems:
+        for msg in problems:
+            print(f"  GAGAL    installer: {msg}")
+        return False
+    print("  ok       installer: istilah, kutip [Run], urutan [Code] bersih")
+    return True
+
+
 def check_required() -> bool:
     missing = [r for r in REQUIRED if not (ROOT / r).is_file()]
     if not missing:
@@ -199,6 +261,7 @@ def main() -> int:
     ok = check_required()
     ok = check_imports() and ok
     ok = check_workflow_quotes() and ok
+    ok = check_installer() and ok
     for rel, marker, desc in CHECKS:
         p = ROOT / rel
         if not p.is_file():
