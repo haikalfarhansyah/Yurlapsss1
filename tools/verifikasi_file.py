@@ -186,8 +186,21 @@ def check_installer() -> bool:
         if line.strip().lower().startswith("parameters:") and '""' in line:
             problems.append(f"baris {i}: Parameters memuat kutip ganda bersarang")
 
+    # Typo klasik: ewWaitUntilTerminate (kurang 'd') -> "Unknown identifier".
+    if re.search(r"ewWaitUntilTerminate\b", text):
+        problems.append("ewWaitUntilTerminate salah tulis (harus ewWaitUntilTerminated)")
+
     if "[Code]" in text:
         code = text.split("[Code]", 1)[1]
+        # Komentar Pascal ({ ... }) berakhir pada "}" pertama, jadi kurung
+        # kurawal di dalam komentar memotongnya -> syntax error. Di [Code]
+        # kita hanya memakai komentar "//".
+        for i, line in enumerate(code.splitlines(), 1):
+            stripped = line.lstrip()
+            if stripped.startswith("{") and not stripped.startswith("{#"):
+                problems.append(
+                    f"[Code] baris {i}: komentar {{...}} dipakai; pakai // "
+                    f"(kurung kurawal di dalam komentar memotong komentar)")
         defs: dict[str, int] = {}
         for i, line in enumerate(code.splitlines()):
             m = re.match(r"\s*(?:function|procedure)\s+(\w+)", line)

@@ -161,3 +161,29 @@ Kalau kamu punya Python di Windows:
 3. Hasil: `dist\YurLaps\YurLaps.exe`
 
 Hasil build lokal dan build GitHub identik isinya.
+
+## 8. Kalau kompilasi installer gagal (`Compiling [Code] section`)
+
+Pesan dari ISCC sering terpotong di log CI. Tiga penyebab yang pernah terjadi di
+proyek ini, semuanya bisa dicek lebih dulu tanpa Windows:
+
+```powershell
+python tools/verifikasi_file.py     # memeriksa installer/stintlab.iss
+```
+
+Yang diperiksa:
+
+| Gejala di log ISCC | Penyebab | Aturan |
+|---|---|---|
+| `column 53: Syntax error` | komentar `{ ... }` yang isinya kurung kurawal, mis. `{param:X}` — komentar Pascal berakhir di `}` pertama | di `[Code]` hanya pakai komentar `//` |
+| `Unknown identifier 'ewWaitUntilTerminate'` | salah tulis | namanya `ewWaitUntilTerminated` |
+| `Unknown identifier 'UseZadig'` | fungsi dipanggil sebelum dideklarasikan | deklarasikan fungsi di atas pemakainya |
+| `Mismatched or misplaced quotes` | `""` di dalam nilai `Parameters:` pada `[Run]` | hindari kutip bersarang (nama perangkat dibuat satu kata) |
+
+Mau mencoba mengompilasi di luar Windows? ISCC jalan di Wine:
+
+```bash
+WINEPREFIX=~/.wineinno32 WINEARCH=win32 wineboot -i      # sekali saja
+wine innosetup-6.7.4.exe /VERYSILENT /NORESTART /SP-     # pasang Inno Setup
+wine "$WINEPREFIX/drive_c/Program Files/Inno Setup 6/ISCC.exe" installer/stintlab.iss
+```

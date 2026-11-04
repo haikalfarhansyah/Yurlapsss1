@@ -96,33 +96,32 @@ Filename: "{app}\{#AppExeName}"; Description: "Jalankan {#AppName}"; \
 Type: filesandordirs; Name: "{app}\vendor"
 
 [Code]
-{ Mode pembaruan: aplikasi memanggil installer ini dengan /UPDATEZIP=<zip>.
-  Nilainya dibaca lewat konstanta {param:UPDATEZIP} — tidak perlu loop
-  ParamStr/ParamCount di sini, jadi bagian ini tetap sederhana untuk
-  dikompilasi (bagian yang rumit = sumber error yang sulit dibaca di CI). }
-function UpdateZip: String;
+// Hanya komentar "//" yang dipakai di bagian ini.
+// Jangan memakai komentar { ... } di sini: komentar Pascal berakhir pada "}"
+// pertama, sehingga menyebut {param:...} di dalam komentar akan memotong
+// komentarnya dan memunculkan "Syntax error" yang membingungkan.
+
+// Mode pembaruan: aplikasi memanggil installer ini dengan /UPDATEZIP=<file.zip>.
+// Nilainya dibaca lewat konstanta param:UPDATEZIP.
+function IsUpdateMode: Boolean;
 begin
-  Result := Trim(ExpandConstant('{param:UPDATEZIP}'));
+  Result := ExpandConstant('{param:UPDATEZIP}') <> '';
 end;
 
-{ Kutip satu nilai untuk PowerShell: 'teks' }
+// Kutip satu nilai untuk PowerShell: 'teks'
 function PsQuote(const S: String): String;
 begin
   Result := '''' + S + '''';
 end;
 
-function IsUpdateMode(): Boolean;
-begin
-  Result := UpdateZip() <> '';
-end;
-
 // Entri [Run] hanya dijalankan kalau alatnya benar-benar ikut terpasang.
-// (UserInfo: kalau wdi-simple ada -> dipakai; kalau tidak -> Zadig.)
 function UseWdiSimple: Boolean;
 begin
   Result := FileExists(ExpandConstant('{app}\vendor\win\wdi-simple.exe'));
 end;
 
+// UseZadig harus ditulis sebelum dipakai: Pascal Script tidak mengenal
+// pemanggilan fungsi yang baru dideklarasikan belakangan.
 function UseZadig: Boolean;
 begin
   Result := (not FileExists(ExpandConstant('{app}\vendor\win\wdi-simple.exe')))
@@ -131,8 +130,6 @@ end;
 
 function UseZadigAndNotUpdate: Boolean;
 begin
-  // UseZadig() harus sudah dideklarasikan di atas: Pascal Script tidak
-  // mengenal pemanggilan fungsi yang baru muncul belakangan.
   Result := UseZadig() and (not IsUpdateMode());
 end;
 
@@ -146,12 +143,12 @@ end;
 //   YurLaps-Setup.exe /VERYSILENT /UPDATEZIP=<file.zip>
 // Installer tetap memasang seluruh paket (pintasan, uninstaller, entri
 // "Apps & features" selalu sinkron), lalu menimpa isinya dengan isi zip.
-procedure ApplyUpdateZip();
+procedure ApplyUpdateZip;
 var
   rc: Integer;
-  tmp, base, zipFile, psFile: String;
+  tmp, base, zipFile, psFile, script: String;
 begin
-  zipFile := UpdateZip();
+  zipFile := ExpandConstant('{param:UPDATEZIP}');
   if not FileExists(zipFile) then
   begin
     Log('Zip pembaruan tidak ditemukan: ' + zipFile);
@@ -163,16 +160,16 @@ begin
   // Skrip PowerShell ditulis ke file dulu lalu dijalankan dengan -File.
   // Satu baris perintah penuh tanda kutip bertumpuk terlalu mudah salah.
   psFile := tmp + '\extract.ps1';
-  SaveStringToFile(psFile,
-    'Add-Type -AssemblyName System.IO.Compression.FileSystem' + #13#10 +
-    '[System.IO.Compression.ZipFile]::ExtractToDirectory(' +
-    PsQuote(zipFile) + ', ' + PsQuote(tmp) + ')' + #13#10, False);
+  script := 'Add-Type -AssemblyName System.IO.Compression.FileSystem' + #13#10 +
+            '[System.IO.Compression.ZipFile]::ExtractToDirectory(' +
+            PsQuote(zipFile) + ', ' + PsQuote(tmp) + ')' + #13#10;
+  SaveStringToFile(psFile, script, False);
   Exec('powershell', '-NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"',
-       '', SW_HIDE, ewWaitUntilTerminate, rc);
+       '', SW_HIDE, ewWaitUntilTerminated, rc);
   // robocopy ada di semua Windows 8/8.1/10/11; data pengguna tidak disentuh
   Exec('robocopy', '"' + tmp + '" "' + base + '" /E /R:2 /W:1 /NFL /NDL /NJH /NJS ' +
        '/XD "' + base + '\data" /XF portable.txt', '', SW_HIDE,
-       ewWaitUntilTerminate, rc);
+       ewWaitUntilTerminated, rc);
   DelTree(tmp, True, True, True);
   Log('Isi zip pembaruan dipasang (kode ' + IntToStr(rc) + ')');
 end;
