@@ -62,17 +62,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Ambil sumber OpenStint + patch YurLaps
-        shell: msys2 {0}
-        run: |
-          set -eu
-          REF="$(tr -d '[:space:]' < decoder/patch/upstream-ref.txt)"
-          echo "OpenStint versi: $REF"
-          git clone --depth 1 --branch "$REF" https://github.com/zsellera/openstint.git upstream
-          cd upstream
-          git rev-parse HEAD | tee ../upstream-commit.txt
-          git apply --verbose ../decoder/patch/rename-target.patch
-
       - name: Setup MSYS2 (MINGW64)
         uses: msys2/setup-msys2@v2
         with:
@@ -93,6 +82,17 @@ jobs:
             libtool
             pkg-config
             zip
+
+      - name: Ambil sumber OpenStint + patch YurLaps
+        shell: msys2 {0}
+        run: |
+          set -eu
+          REF="$(tr -d '[:space:]' < decoder/patch/upstream-ref.txt)"
+          echo "OpenStint versi: $REF"
+          git clone --depth 1 --branch "$REF" https://github.com/zsellera/openstint.git upstream
+          cd upstream
+          git rev-parse HEAD | tee ../upstream-commit.txt
+          git apply --verbose ../decoder/patch/rename-target.patch
 
       - name: Install liquid-dsp
         shell: msys2 {0}
@@ -132,19 +132,41 @@ jobs:
           cd upstream
           mkdir -p ../decoder-out
           cp staging/bin/YurLapsDecoder.exe ../decoder-out/
-          for dll in $(ntldd -R ../decoder-out/YurLapsDecoder.exe \
-                       | grep -i mingw64 | awk '{print $3}' | tr -d '<>' | sort -u); do
-            cp "$dll" ../decoder-out/ || true
+          # ntldd bisa tidak ada / gagal di lingkungan MSYS2 tertentu; kalau
+          # begitu, salin DLL yang pasti dibutuhkan dari /mingw64/bin.
+          DLLS=""
+          if command -v ntldd >/dev/null 2>&1; then
+            DLLS=$(ntldd -R ../decoder-out/YurLapsDecoder.exe 2>/dev/null \
+                   | grep -i mingw64 | awk '{print $3}' | tr -d '<>' | sort -u || true)
+          fi
+          if [ -z "$DLLS" ]; then
+            echo "ntldd tidak tersedia - memakai daftar DLL tetap"
+            DLLS="libzmq.dll libsodium.dll libusb-1.0.dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll"
+          fi
+          for dll in $DLLS; do
+            if [ -f "/mingw64/bin/$dll" ]; then
+              cp "/mingw64/bin/$dll" ../decoder-out/
+            elif [ -f "$dll" ]; then
+              cp "$dll" ../decoder-out/
+            else
+              echo "  (lewat) $dll"
+            fi
           done
           cp "$GITHUB_WORKSPACE/decoder/ATTRIBUTION.txt" ../decoder-out/
-          ls -la ../decoder-out
+          echo "isi paket decoder:"; ls -la ../decoder-out
 
       - name: Uji decoder bisa dijalankan
         shell: msys2 {0}
         run: |
           set -eu
           cd decoder-out
-          ./YurLapsDecoder.exe --salah 2>&1 | grep -q "Usage" && echo "OK: YurLapsDecoder berjalan"
+          OUT=$(./YurLapsDecoder.exe --salah 2>&1 || true)
+          if printf '%s' "$OUT" | grep -q "Usage"; then
+            echo "OK: YurLapsDecoder berjalan"
+          else
+            echo "Keluaran decoder:"; printf '%s\n' "$OUT" | head -5
+            echo "GAGAL: decoder tidak mencetak Usage"; exit 1
+          fi
 
       - name: Simpan decoder + sumber (kepatuhan GPL-3.0)
         shell: msys2 {0}
@@ -301,11 +323,16 @@ jobs:
         working-directory: ${{ steps.detect.outputs.root }}/desktop
         run: npm run dist
 
-      - name: Salin aplikasi hasil build ke dist\YurLaps (untuk Inno)
+      - name: Siapkan aplikasi untuk installer pembaruan (Inno)
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
         run: |
+          # dist\YurLaps hanya berisi APLIKASI (bukan installer) supaya
+          # installer tidak memungut dirinya sendiri. Hasil Inno ditulis ke
+          # dist\ dengan nama YurLaps-Setup-<versi>-full.exe.
+          New-Item -ItemType Directory -Force dist\YurLaps | Out-Null
           Copy-Item dist-electron\win-unpacked\* dist\YurLaps\ -Recurse -Force
+          Remove-Item dist\YurLaps\*.exe -Exclude "YurLaps.exe" -Force -ErrorAction SilentlyContinue
           if (-not (Test-Path "dist\YurLaps\YurLaps.exe")) { throw "dist\YurLaps\YurLaps.exe tidak ada" }
 
       - name: Build installer Inno (YurLaps-Setup untuk pembaruan)
@@ -324,8 +351,16 @@ jobs:
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
         run: |
-          Get-ChildItem dist-electron | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
-          Get-ChildItem dist -Filter *.exe | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+          Write-Host "=== INSTALLER UTAMA (pakai ini) ==="
+          Get-ChildItem dist-electron -Include *.exe,*.zip -Recurse -Depth 0 |
+            Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+          Write-Host ""
+          Write-Host "=== ALAT PEMBARUAN (bukan untuk dipasang manual) ==="
+          Get-ChildItem dist -Filter *-full.exe |
+            Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+          Write-Host ""
+          Write-Host "update.json:"
+          Get-ChildItem dist -Filter *.json | Select-Object Name
 
       - uses: actions/upload-artifact@v7
         with:
@@ -333,7 +368,7 @@ jobs:
           path: |
             ${{ steps.detect.outputs.root }}/dist-electron/*.exe
             ${{ steps.detect.outputs.root }}/dist-electron/*.zip
-            ${{ steps.detect.outputs.root }}/dist/*.exe
+            ${{ steps.detect.outputs.root }}/dist/*-full.exe
             ${{ steps.detect.outputs.root }}/dist/*.json
           if-no-files-found: warn
 

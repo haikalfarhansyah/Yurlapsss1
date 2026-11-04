@@ -195,6 +195,42 @@ def check_workflow_quotes() -> bool:
     return True
 
 
+def check_installer_names() -> bool:
+    """Dua jalur build menghasilkan installer; namanya HARUS beda.
+
+    electron-builder -> YurLaps-Setup-<versi>.exe   (installer utama)
+    Inno Setup      -> YurLaps-Setup-<versi>-full.exe (alat pembaruan /UPDATEZIP)
+
+    Kalau namanya sama, yang kedua menimpa yang pertama dan pengguna bingung
+    (pernah terjadi: dua file "installer" di artifact).
+    """
+    iss = ROOT / "installer" / "stintlab.iss"
+    pkg = ROOT / "desktop" / "package.json"
+    if not iss.is_file() or not pkg.is_file():
+        print("  HILANG  installer/stintlab.iss atau desktop/package.json")
+        return False
+    import json
+
+    base = ""
+    for line in iss.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.strip().startswith("OutputBaseFilename="):
+            base = line.split("=", 1)[1].strip()
+    eb = json.loads(pkg.read_text(encoding="utf-8")).get("build", {}).get("artifactName", "")
+    if not base:
+        print("  GAGAL    OutputBaseFilename tidak ada di installer/stintlab.iss")
+        return False
+    inno_name = base.replace("{#AppVersion}", "X")
+    if not inno_name.lower().endswith(".exe"):
+        inno_name += ".exe"          # Inno menambahkan .exe sendiri
+    eb_name = eb.replace("${version}", "X").replace("${ext}", "exe")
+    if inno_name.lower() == eb_name.lower():
+        print("  GAGAL    installer Inno dan electron-builder memakai nama sama")
+        print("           beri akhiran berbeda, mis. -full untuk Inno")
+        return False
+    print("  ok       dua installer bernama beda (tidak saling menimpa)")
+    return True
+
+
 def check_nsis_hooks() -> bool:
     """Hook NSIS (build/installer-hooks.nsh) dijalankan saat *kompilasi*.
 
@@ -222,6 +258,43 @@ KEYWORDS = {
     "while", "repeat", "until", "case", "of", "function", "procedure", "var",
     "const", "result", "exit", "div", "mod", "in", "with", "record", "array",
 }
+
+
+def check_workflow_tools() -> bool:
+    """Alat harus DIPASANG sebelum dipakai di workflow.
+
+    Dua kegagalan nyata di proyek ini:
+      * "msys2: command not found"  -> step shell: msys2 {0} sebelum
+        msys2/setup-msys2
+      * "File ... no files found"   -> NSIS memakai berkas yang belum dibuat
+
+    Aturan yang diperiksa: setiap langkah yang memakai shell msys2 harus berada
+    setelah langkah setup-msys2 di job yang sama.
+    """
+    import yaml
+
+    wf = ROOT / ".github" / "workflows" / "build-windows.yml"
+    if not wf.is_file():
+        print("  HILANG  .github/workflows/build-windows.yml")
+        return False
+    data = yaml.safe_load(wf.read_text(encoding="utf-8"))
+    masalah = []
+    for job, spec in (data.get("jobs") or {}).items():
+        setup = None
+        for i, step in enumerate(spec.get("steps") or []):
+            uses = str(step.get("uses") or "")
+            shell = str(step.get("shell") or "")
+            if "setup-msys2" in uses:
+                setup = i
+            elif shell.startswith("msys2") and setup is None:
+                masalah.append(f"{job}: '{step.get('name')}' memakai msys2 "
+                               f"sebelum msys2/setup-msys2")
+    if masalah:
+        for m in masalah:
+            print(f"  GAGAL    urutan alat: {m}")
+        return False
+    print("  ok       workflow: msys2 dipasang sebelum dipakai")
+    return True
 
 
 def check_package_marker() -> bool:
@@ -385,8 +458,10 @@ def main() -> int:
     ok = check_imports() and ok
     ok = check_workflow_quotes() and ok
     ok = check_package_marker() and ok
+    ok = check_workflow_tools() and ok
     ok = check_installer() and ok
     ok = check_nsis_hooks() and ok
+    ok = check_installer_names() and ok
     ok = check_workflow_order() and ok
     for rel, marker, desc in CHECKS:
         p = ROOT / rel

@@ -40,7 +40,11 @@ AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 OutputDir=..\dist
-OutputBaseFilename=YurLaps-Setup-{#AppVersion}
+// Nama sengaja BEDA dari installer utama (electron-builder) supaya tidak
+// tertimpa: electron-builder menghasilkan YurLaps-Setup-<versi>.exe lebih dulu,
+// Inno menulis sesudahnya. Installer ini hanya dipakai untuk mode pembaruan
+// /UPDATEZIP (memasang paket penuh + memperbarui lewat zip).
+OutputBaseFilename=YurLaps-Setup-{#AppVersion}-full
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

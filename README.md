@@ -44,6 +44,23 @@ handicap, sector timing, klasemen multi-sesi.
 
 ---
 
+
+### Dua berkas "installer" di hasil build — mana yang dipakai?
+
+Build menghasilkan dua `.exe`. Ini disengaja, dan dipakai untuk hal berbeda:
+
+| Berkas | Ukuran | Untuk apa |
+|---|---|---|
+| **`YurLaps-Setup-0.3.0.exe`** | ±100 MB | **Installer utama — pakai ini.** Dibuat electron-builder (NSIS), sudah memuat aplikasi + decoder. |
+| `YurLaps-Setup-0.3.0-full.exe` | ±2 MB | **Alat pembaruan**, bukan untuk dipasang manual. Saat aplikasi memperbarui dirinya, ia menjalankan berkas ini dengan `/UPDATEZIP=<zip>` untuk memasang versi baru dan menyegarkan pintasan/uninstaller. |
+| `YurLaps-0.3.0-win.zip` | ±120 MB | Versi portable, tanpa instalasi. |
+
+Kalau kamu hanya ingin memasang YurLaps: **pilih `YurLaps-Setup-0.3.0.exe`**.
+
+Kenapa dua? Karena keduanya harus ada: electron-builder tidak bisa menjalankan
+logika pembaruan berbasis zip, dan Inno tidak bisa membungkus jendela Electron
+sebagai aplikasi utama di jalur *silent install*.
+
 ## Tampilan
 
 Jendela aplikasi sendiri, seperti aplikasi desktop biasa — **tidak ada browser,

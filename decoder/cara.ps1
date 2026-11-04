@@ -48,6 +48,8 @@ pacman -S --needed --noconfirm \
 "@
 
 Write-Host "== 2/4 ambil sumber + patch ==" -ForegroundColor Cyan
+# Catatan: langkah ini memakai git + patch dari MSYS2, jadi harus SETELAH
+# paket di langkah 1 terpasang (kalau tidak: "command not found").
 & $BASH -lc @"
 set -eu
 cd '$MSYS_HERE'
