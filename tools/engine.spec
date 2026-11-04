@@ -16,16 +16,32 @@ PROJECT = ROOT.parent                    # .../stintlab
 ASSETS = PROJECT / "assets"
 OUT = PROJECT / "desktop" / "engine"
 
+# --- berkas data yang ikut dibundel -----------------------------------------
+def _datas():
+    """UI web + aset + decoder/driver (vendor).
+
+    Decoder dan alat driver ditaruh di "vendor/..." supaya saat dibundel berada
+    di _internal/vendor/... — persis lokasi yang dicari app/decoder_manager.py
+    (app_root() menunjuk folder _internal saat dibundel).
+    """
+    items = [
+        (str(PROJECT / "app" / "static"), "app/static"),
+        (str(ASSETS / "yurlaps-logo.png"), "assets"),
+    ]
+    for extra in ("vendor/win", "vendor/openstint"):
+        src = PROJECT / extra
+        if src.is_dir():
+            items.append((str(src), extra))
+    return items
+
+
 a = Analysis(
     [str(ROOT / "engine_entry.py")],
     pathex=[str(PROJECT)],
     binaries=[],
     # UI web (index.html + aset) HARUS ikut: jendela Electron memuatnya dari
     # server lokal. Tanpa ini aplikasi hasil build menampilkan 404.
-    datas=[
-        (str(PROJECT / "app" / "static"), "app/static"),
-        (str(ASSETS / "yurlaps-logo.png"), "assets"),
-    ],
+    datas=_datas(),
     hiddenimports=[
         "app.webapp",
         "app.native",          # diimpor oleh modul main walau tidak dipakai

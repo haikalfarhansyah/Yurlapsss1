@@ -39,7 +39,10 @@ OPENSTINT_ASSET_HINT = "windows-x64-Release.zip"
 
 # Nama file yang kita cari setelah ekstrak (rilis resmi memakai .exe; build
 # Linux tanpa ekstensi).
-EXE_NAMES = ("openstint_rtlsdr.exe", "openstint_rtlsdr",
+# YurLapsDecoder = biner hasil build kita dari sumber OpenStint (GPL-3.0).
+# Nama lama tetap dicari belakangan supaya instalasi yang sudah ada tidak rusak.
+EXE_NAMES = ("YurLapsDecoder.exe", "YurLapsDecoder",
+             "openstint_rtlsdr.exe", "openstint_rtlsdr",
              "openstint_hackrf.exe", "openstint_hackrf")
 
 
@@ -137,13 +140,37 @@ class DecoderManager(threading.Thread):
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def _vendor_dirs(self) -> tuple[Path, ...]:
+        """Folder tempat biner decoder bisa berada, urut prioritas.
+
+        PyInstaller onedir menaruh berkas data di ``_internal/``, sedangkan
+        ``app_root()`` menunjuk folder di atasnya — jadi ``vendor/`` harus
+        dicari di KEDUA tempat, plus ``sys._MEIPASS`` untuk mode onefile.
+        """
+        cands: list[Path] = []
+        root = app_root()
+        cands.append(root / "vendor" / "openstint")
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            cands.append(Path(meipass) / "vendor" / "openstint")
+        cands.append(root / "_internal" / "vendor" / "openstint")
+        # hasil build PyInstaller (mesin Electron) saat dijalankan dari repo
+        cands.append(root / "engine" / "_internal" / "vendor" / "openstint")
+        cands.append(self.bin_dir())
+        seen, out = set(), []
+        for c in cands:
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+        return tuple(out)
+
     def find_decoder(self) -> Optional[Path]:
         """Cari biner decoder: config → vendor → bin data dir → PATH."""
         if self.cfg.decoder_exe:
             p = Path(self.cfg.decoder_exe).expanduser()
             if p.is_file():
                 return p
-        for base in (app_root() / "vendor" / "openstint", self.bin_dir()):
+        for base in self._vendor_dirs():
             for name in exe_names():
                 p = base / name
                 if p.is_file():

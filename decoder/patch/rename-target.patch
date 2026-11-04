@@ -1,0 +1,16 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 0a7b285..cddcf05 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -63,7 +63,10 @@ endif()
+ 
+ if(USE_RTLSDR)
+     # RTL-SDR maxes out at the required minimum of 2.5 MSPS, so this is fixed.
+-    openstint_add_decoder(openstint_rtlsdr main_rtlsdr.cpp openstint::rtlsdr 2)
++    # YurLaps: nama target diganti supaya biner yang dijalankan aplikasi
++    # bernama YurLapsDecoder.exe. Perubahan ini adalah satu-satunya patch kita
++    # di sumber OpenStint (lihat src/PATCH-YURLAPS.md).
++    openstint_add_decoder(YurLapsDecoder main_rtlsdr.cpp openstint::rtlsdr 2)
+ endif()
+ 
+ if(WIN32 AND (USE_HACKRF OR USE_RTLSDR))

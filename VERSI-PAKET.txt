@@ -4,6 +4,7 @@ PENANDA VERSI PAKET — YurLaps
 PAKET       : 0.3.0 (Electron)
 DIBUAT      : 2026-11-04
 PATCH       : tanpa-hook-nsis
+PATCH2      : satu-repo-decoder
 
 Kenapa file ini ada?
 --------------------
@@ -13,6 +14,16 @@ akan gagal dengan pesan "File ... no files found" pada langkah NSIS.
 
 Kalau kamu melihat pesan itu, JANGAN mencari bug di kode:
 unggah ulang zip terbaru dari workspace.
+
+Yang berubah di paket "satu-repo-decoder"
+-----------------------------------------
+* Decoder dibangun di repo yang sama: job "decoder" di
+  .github/workflows/build-windows.yml (sebelumnya folder decoder-build/
+  disuruh ditaruh di repo terpisah -- sekarang TIDAK lagi).
+* vendor/openstint + vendor/win ikut dibundel ke dalam paket aplikasi
+  (_internal/vendor/...), jadi decoder benar-benar terpasang bersama app.
+* app/decoder_manager.py mencari vendor/ juga di _internal/ (PyInstaller
+  onedir) -- sebelumnya decoder di paket TIDAK ditemukan.
 
 Yang sudah diperbaiki di paket ini
 ----------------------------------

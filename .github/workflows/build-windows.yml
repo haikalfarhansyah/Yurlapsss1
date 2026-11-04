@@ -32,7 +32,7 @@ jobs:
       - name: Pastikan paket yang diunggah versi terbaru
         run: |
           test -f VERSI-PAKET.txt || { echo "VERSI-PAKET.txt tidak ada: zip lama"; exit 1; }
-          grep -Eq "PATCH[[:space:]]*:[[:space:]]*tanpa-hook-nsis" VERSI-PAKET.txt || { echo "penanda paket tidak cocok: zip lama"; exit 1; }
+          grep -q "tanpa-hook-nsis" VERSI-PAKET.txt || { echo "penanda paket tidak cocok: zip lama"; exit 1; }
           if [ -f desktop/build/installer-hooks.nsh ]; then echo "hook NSIS lama masih ada"; exit 1; fi
           grep -q '"include"' desktop/package.json && { echo "package.json masih memakai nsis.include"; exit 1; }
           echo "OK: paket terbaru"
@@ -52,10 +52,121 @@ jobs:
           YURLAPS_DATA: ${{ runner.temp }}/yl-man
 
   # ---------------------------------------------------------------------------
+  # 2. Decoder YurLaps: dibangun dari sumber OpenStint (GPL-3.0), satu patch
+  #    nama target. Hasilnya dipakai job "build" di bawah, jadi satu repo
+  #    menghasilkan aplikasi + decoder sekaligus.
+  # ---------------------------------------------------------------------------
+  decoder:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ambil sumber OpenStint + patch YurLaps
+        shell: msys2 {0}
+        run: |
+          set -eu
+          REF="$(tr -d '[:space:]' < decoder/patch/upstream-ref.txt)"
+          echo "OpenStint versi: $REF"
+          git clone --depth 1 --branch "$REF" https://github.com/zsellera/openstint.git upstream
+          cd upstream
+          git rev-parse HEAD | tee ../upstream-commit.txt
+          git apply --verbose ../decoder/patch/rename-target.patch
+
+      - name: Setup MSYS2 (MINGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          cache: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-zeromq
+            mingw-w64-x86_64-cppzmq
+            mingw-w64-x86_64-libusb
+            git
+            make
+            autoconf
+            automake
+            libtool
+            pkg-config
+            zip
+
+      - name: Install liquid-dsp
+        shell: msys2 {0}
+        run: |
+          set -eu
+          LIQUID=https://raw.githubusercontent.com/cjcliffe/CubicSDR/refs/heads/master/external/liquid-dsp
+          mkdir -p /mingw64/include/liquid
+          curl -sSfL -o /mingw64/include/liquid/liquid.h "$LIQUID/include/liquid/liquid.h"
+          curl -sSfL -o /mingw64/lib/libliquid.a        "$LIQUID/gcc/64/libliquid.a"
+
+      - name: Install libfec
+        shell: msys2 {0}
+        run: |
+          set -eu
+          git clone --depth 1 https://github.com/quiet/libfec.git
+          cd libfec
+          ./configure --prefix=/mingw64
+          sed -i 's/-lc$//' Makefile
+          sed -i 's/libfec\.so/libfec.dll/' Makefile
+          make
+          cp libfec.dll libfec.a /mingw64/lib
+          cp fec.h /mingw64/include
+
+      - name: Build YurLapsDecoder.exe
+        shell: msys2 {0}
+        run: |
+          set -eu
+          cd upstream
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_HACKRF=OFF -DUSE_RTLSDR=ON -B build .
+          ninja -C build
+          cmake --install build --prefix "$PWD/staging"
+
+      - name: Kumpulkan biner + DLL + atribusi
+        shell: msys2 {0}
+        run: |
+          set -eu
+          cd upstream
+          mkdir -p ../decoder-out
+          cp staging/bin/YurLapsDecoder.exe ../decoder-out/
+          for dll in $(ntldd -R ../decoder-out/YurLapsDecoder.exe \
+                       | grep -i mingw64 | awk '{print $3}' | tr -d '<>' | sort -u); do
+            cp "$dll" ../decoder-out/ || true
+          done
+          cp "$GITHUB_WORKSPACE/decoder/ATTRIBUTION.txt" ../decoder-out/
+          ls -la ../decoder-out
+
+      - name: Uji decoder bisa dijalankan
+        shell: msys2 {0}
+        run: |
+          set -eu
+          cd decoder-out
+          ./YurLapsDecoder.exe --salah 2>&1 | grep -q "Usage" && echo "OK: YurLapsDecoder berjalan"
+
+      - name: Simpan decoder + sumber (kepatuhan GPL-3.0)
+        shell: msys2 {0}
+        run: |
+          set -eu
+          cd upstream && rm -rf build staging .git && cd ..
+          zip -qr yurlaps-decoder-src.zip upstream
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: yurlaps-decoder
+          path: |
+            decoder-out/*
+            yurlaps-decoder-src.zip
+            upstream-commit.txt
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
   # 2. Build Windows: mesin Python + jendela Electron
   # ---------------------------------------------------------------------------
   build:
-    needs: test
+    needs: [test, decoder]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -88,7 +199,7 @@ jobs:
             throw "VERSI-PAKET.txt tidak ada: zip yang diunggah adalah paket lama. Unggah ulang yurlaps-0.3.0-full.zip versi terbaru."
           }
           $t = Get-Content "VERSI-PAKET.txt" -Raw
-          if ($t -notmatch "PATCH\s*:\s*tanpa-hook-nsis") {
+          if ($t -notmatch "tanpa-hook-nsis") {
             throw "Penanda paket tidak cocok: unggah ulang zip terbaru (lihat VERSI-PAKET.txt)."
           }
           if (Test-Path "desktop/build/installer-hooks.nsh") {
@@ -104,10 +215,27 @@ jobs:
         working-directory: ${{ steps.detect.outputs.root }}
         run: pip install -r requirements.txt pyinstaller
 
-      - name: Ambil komponen pihak ketiga (Zadig + OpenStint)
+      # Decoder dibangun di job "decoder" pada workflow ini juga (satu repo),
+      # lalu diunduh ke vendor/openstint sebelum aplikasi dibangun.
+      - name: Unduh decoder hasil job decoder
+        uses: actions/download-artifact@v5
+        with:
+          name: yurlaps-decoder
+          path: ${{ steps.detect.outputs.root }}/vendor/openstint
+
+      - name: Pastikan decoder siap dipakai
         working-directory: ${{ steps.detect.outputs.root }}
-        run: python tools/fetch_vendor.py
-        continue-on-error: true        # aplikasi tetap bisa dibangun tanpanya
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem vendor\openstint -Filter "YurLapsDecoder*" -ErrorAction SilentlyContinue
+          if ($exe) {
+            Write-Host "OK: memakai decoder YurLaps ($($exe[0].Name))"
+            if (-not (Test-Path "vendor\openstint\ATTRIBUTION.txt")) {
+              throw "ATTRIBUTION.txt tidak ada: atribusi GPL-3.0 wajib ikut"
+            }
+          } else {
+            Write-Host "Catatan: decoder YurLaps belum tersedia; aplikasi tetap dibangun."
+          }
 
       # ---- 2a. Mesin (tanpa Tk, dipanggil jendela Electron) ----
       - name: Build mesin YurLapsEngine.exe

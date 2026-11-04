@@ -1,0 +1,49 @@
+OpenStint — komponen decoder YurLaps
+====================================
+
+YurLaps mendistribusikan biner decoder bernama YurLapsDecoder.exe.
+Biner ini DIBANGUN DARI SUMBER OpenStint, bukan karya kami sendiri.
+
+  Proyek asal : OpenStint
+  Sumber      : https://github.com/zsellera/openstint
+  Lisensi     : GNU General Public License v3.0 (GPL-3.0)
+  Teks lisensi: https://www.gnu.org/licenses/gpl-3.0.txt
+  Versi dasar : v260830.1 (tag rilis OpenStint)
+
+Perubahan yang kami lakukan pada sumber
+---------------------------------------
+Satu perubahan saja, pada src/CMakeLists.txt:
+
+  - openstint_add_decoder(openstint_rtlsdr main_rtlsdr.cpp openstint::rtlsdr 2)
+  + openstint_add_decoder(YurLapsDecoder  main_rtlsdr.cpp openstint::rtlsdr 2)
+
+Tujuannya hanya mengganti nama berkas hasil build agar di Task Manager
+pengguna terlihat "YurLapsDecoder.exe". Tidak ada perubahan pada:
+  * algoritma deteksi lintasan (src/passing.cpp)
+  * demodulasi, FEC, CRC, atau timing (src/frame.cpp, src/syndrome.cpp, dll.)
+  * protokol ZeroMQ
+
+Patch lengkap tersedia di: patch/rename-target.patch
+
+Sumber lengkap
+--------------
+Sesuai GPL-3.0, sumber lengkap dari biner yang kami kirim tersedia sebagai:
+
+  yurlaps-decoder-src.zip   (disertakan pada setiap rilis)
+
+Arsip itu berisi seluruh pohon sumber OpenStint pada versi di atas beserta
+patch kami, sehingga siapa pun dapat memeriksa dan membangun ulang biner yang
+sama. Nomor commit upstream yang dipakai dicatat di upstream-commit.txt.
+
+Hak dan kewajiban
+-----------------
+Biner ini tetap berlisensi GPL-3.0. Anda boleh memakai, mempelajari, menyebar
+ulang, dan memodifikasinya dengan syarat yang sama. YurLaps tidak menambahkan
+pembatasan apa pun di atas lisensi tersebut.
+
+Aplikasi YurLaps sendiri (Python/Electron) berlisensi MIT dan merupakan karya
+terpisah; ia hanya MENJALANKAN biner ini sebagai proses lain dan berkomunikasi
+lewat protokol ZeroMQ yang didokumentasikan OpenStint.
+
+YurLaps tidak berafiliasi dengan pemilik OpenStint. Nama dan merek OpenStint
+milik pemiliknya masing-masing.
