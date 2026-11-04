@@ -1,0 +1,39 @@
+PENANDA VERSI PAKET — YurLaps
+=============================
+
+PAKET       : 0.3.0 (Electron)
+DIBUAT      : 2026-11-04
+PATCH       : tanpa-hook-nsis
+
+Kenapa file ini ada?
+--------------------
+CI memeriksa penanda ini SEBELUM build. Kalau penandanya tidak cocok
+(atau tidak ada), berarti zip yang diunggah masih versi lama dan build
+akan gagal dengan pesan "File ... no files found" pada langkah NSIS.
+
+Kalau kamu melihat pesan itu, JANGAN mencari bug di kode:
+unggah ulang zip terbaru dari workspace.
+
+Yang sudah diperbaiki di paket ini
+----------------------------------
+1. desktop/build/installer-hooks.nsh DIHAPUS.
+   Perintah `File` di NSIS dieksekusi saat kompilasi, bukan saat install,
+   jadi tidak bisa dibungkus ${If} ${FileExists}.
+2. desktop/package.json tidak lagi memakai "nsis": { "include": ... }.
+3. Urutan workflow: electron-builder (NSIS) -> salin ke dist\YurLaps -> ISCC.
+4. tools/engine.spec membundel app/static (UI web) ke dalam mesin.
+5. app/static/index.html mencoba ulang saat mesin belum siap
+   ("Menyambungkan…"), tidak langsung "Tidak bisa memuat data".
+6. tests/test_integration.py memakai http.server (bukan Flask), sehingga
+   uji sinkronisasi selalu jalan dan tidak ada peringatan dev server.
+7. app/main.py: --electron (server lokal 127.0.0.1, port acak).
+
+Cara cepat memeriksa zip yang kamu punya
+----------------------------------------
+  unzip -l yurlaps-0.3.0-full.zip | grep installer-hooks
+      -> harus KOSONG (tidak ada hasil)
+
+  unzip -p yurlaps-0.3.0-full.zip desktop/package.json | grep include
+      -> harus KOSONG (tidak ada hasil)
+
+Kalau salah satu memunculkan hasil, itu paket lama.

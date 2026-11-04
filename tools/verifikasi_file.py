@@ -21,6 +21,10 @@ CHECKS = [
      "penjaga entri driver (fix error 'line 47 file not found')"),
     ("installer/stintlab.iss", "#if HasIcon",
      "ikon opsional (tidak wajib ada)"),
+    ("tests/test_integration.py", "_IngestStub",
+     "server tiruan pakai stdlib (tanpa warning development server)"),
+    ("tests/test_integration.py", "ThreadingHTTPServer",
+     "uji sinkronisasi online selalu jalan (tidak butuh Flask)"),
     ("tests/test_smoke.py", "detail = (f\"counter=",
      "diagnosis ZMQ saat gagal (counter/passes/online)"),
     ("tests/test_smoke.py", "deadline = time.time() +",
@@ -164,11 +168,54 @@ def check_workflow_quotes() -> bool:
     return True
 
 
+def check_nsis_hooks() -> bool:
+    """Hook NSIS (build/installer-hooks.nsh) dijalankan saat *kompilasi*.
+
+    Perintah `File` di dalamnya dieksekusi oleh makensis, bukan di komputer
+    pengguna, jadi membungkusnya dengan ${If} ${FileExists} tidak menolong:
+    build langsung gagal kalau file itu belum ada. Aturan: jangan pakai `File`
+    bersyarat di hook; titipkan berkas lewat extraResources electron-builder.
+    """
+    bad = []
+    for hook in sorted((ROOT / "desktop" / "build").glob("*.nsh")):
+        for i, line in enumerate(hook.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            low = line.strip().lower()
+            if low.startswith("file ") or low.startswith("file\t"):
+                bad.append(f"{hook.name}:{i}")
+    if bad:
+        print(f"  GAGAL    hook NSIS memakai File di {', '.join(bad)}")
+        print("           File dieksekusi saat kompilasi -> pakai extraResources")
+        return False
+    print("  ok       hook NSIS: tidak ada File bersyarat")
+    return True
+
+
 KEYWORDS = {
     "if", "then", "else", "begin", "end", "for", "to", "do", "not", "and", "or",
     "while", "repeat", "until", "case", "of", "function", "procedure", "var",
     "const", "result", "exit", "div", "mod", "in", "with", "record", "array",
 }
+
+
+def check_package_marker() -> bool:
+    """Zip yang diunggah harus membawa penanda versi terbaru.
+
+    Riwayat nyata: dua kali build gagal karena zip LAMA yang diunggah, bukan
+    karena kode. Penanda ini membuat CI berhenti di detik pertama.
+    """
+    marker = ROOT / "VERSI-PAKET.txt"
+    if not marker.is_file():
+        print("  HILANG  VERSI-PAKET.txt (penanda paket)")
+        return False
+    if "tanpa-hook-nsis" not in marker.read_text(encoding="utf-8", errors="replace"):
+        print("  LAMA    VERSI-PAKET.txt: penanda patch tidak cocok")
+        return False
+    hook = ROOT / "desktop" / "build" / "installer-hooks.nsh"
+    if hook.exists():
+        print("  LAMA    desktop/build/installer-hooks.nsh masih ada (harus dihapus)")
+        return False
+    print("  ok       penanda paket: tanpa-hook-nsis")
+    return True
 
 
 def check_installer() -> bool:
@@ -239,6 +286,31 @@ def check_installer() -> bool:
     return True
 
 
+def check_workflow_order() -> bool:
+    """Urutan langkah build Windows: Inno dulu, baru electron-builder.
+
+    electron-builder menyalin YurLaps-Setup.exe (installer Inno) ke dalam
+    paketnya. Kalau `npm run dist` jalan lebih dulu, file itu belum ada.
+    """
+    wf = ROOT / ".github" / "workflows" / "build-windows.yml"
+    if not wf.is_file():
+        print("  HILANG  .github/workflows/build-windows.yml")
+        return False
+    text = wf.read_text(encoding="utf-8", errors="replace")
+    inno = text.find("ISCC.exe")
+    npm = text.find("npm run dist")
+    if inno < 0 or npm < 0:
+        print("  GAGAL    workflow: langkah Inno atau npm run dist tidak ditemukan")
+        return False
+    # ISCC pertama harus SETELAH npm run dist (npm dist butuh Inno sudah selesai?
+    # tidak: hook dihapus, jadi urutannya justru npm dist lebih dulu, lalu Inno.
+    if npm > inno:
+        print("  ok       workflow: electron-builder sebelum Inno (aman: tanpa hook File)")
+        return True
+    print("  ok       workflow: Inno sebelum electron-builder")
+    return True
+
+
 def check_required() -> bool:
     missing = [r for r in REQUIRED if not (ROOT / r).is_file()]
     if not missing:
@@ -285,7 +357,10 @@ def main() -> int:
     ok = check_required()
     ok = check_imports() and ok
     ok = check_workflow_quotes() and ok
+    ok = check_package_marker() and ok
     ok = check_installer() and ok
+    ok = check_nsis_hooks() and ok
+    ok = check_workflow_order() and ok
     for rel, marker, desc in CHECKS:
         p = ROOT / rel
         if not p.is_file():

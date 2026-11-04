@@ -187,3 +187,28 @@ WINEPREFIX=~/.wineinno32 WINEARCH=win32 wineboot -i      # sekali saja
 wine innosetup-6.7.4.exe /VERYSILENT /NORESTART /SP-     # pasang Inno Setup
 wine "$WINEPREFIX/drive_c/Program Files/Inno Setup 6/ISCC.exe" installer/stintlab.iss
 ```
+
+## 9. Kalau build NSIS gagal: `File: ... -> no files found`
+
+Contoh pesan:
+
+```
+File: "...\dist\YurLaps-Setup.exe" -> no files found.
+Error in macro customInstall on macroline 2
+Error in script "<stdin>" on line 194 -- aborting creation process
+```
+
+Penyebab: perintah `File` di NSIS dieksekusi oleh **makensis saat kompilasi**,
+bukan di komputer pengguna. Jadi membungkusnya dengan `${If} ${FileExists}`
+tidak menolong — saat itu installer Inno memang belum dibuat.
+
+Aturan yang dipakai YurLaps sekarang:
+
+* **Jangan** menyalin berkas lewat hook NSIS (`build/installer-hooks.nsh`).
+* Titipkan berkas lewat `extraResources` di `desktop/package.json`
+  (electron-builder menyalinnya ke `resources/`), atau
+* jalankan Inno **sebelum** electron-builder bila ingin menyalin lewat
+  `extraResources` biasa.
+
+Dijaga otomatis: `python tools/verifikasi_file.py` menolak hook yang memakai
+`File` bersyarat.

@@ -144,35 +144,48 @@ def main():
     check(csv_body.splitlines()[0].startswith("waktu,transponder_id"), "unduh CSV")
     check(len(csv_body.strip().splitlines()) >= 2, "CSV berisi lap")
 
-    # --- sinkronisasi online ke server contoh ---------------------------
-    try:
-        import flask  # noqa: F401
-        received = {}
+    # --- sinkronisasi online ke server tiruan -----------------------------
+    # Server tiruan memakai standard library saja (http.server), bukan Flask:
+    # tidak ada lagi peringatan "development server" di log CI, dan uji ini
+    # selalu berjalan tanpa perlu memasang paket tambahan.
+    import socket
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-        def fake_ingest():
-            from flask import Flask, request, jsonify
-            app = Flask("ingest")
-            @app.post("/api/stintlab/ingest")
-            def ingest():
-                received.update(request.get_json())
-                return jsonify(ok=True)
-            app.run(host="127.0.0.1", port=panel_port, debug=False, use_reloader=False)
+    received = {}
 
-        import socket
-        s = socket.socket(); s.bind(("127.0.0.1", 0)); panel_port = s.getsockname()[1]; s.close()
-        threading.Thread(target=fake_ingest, daemon=True).start()
-        time.sleep(1.2)
+    class _IngestStub(BaseHTTPRequestHandler):
+        def do_POST(self):                       # noqa: N802 (nama dari stdlib)
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length)
+            try:
+                received.update(json.loads(body.decode("utf-8") or "{}"))
+            except Exception:
+                received["(tidak bisa dibaca)"] = body[:200].decode("latin-1")
+            payload = b'{"ok": true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
 
-        cfg.online_enabled = True
-        cfg.online_url = f"http://127.0.0.1:{panel_port}"
-        cfg.online_token = "tok"
-        sync = OnlineSync(engine)
-        ok = sync.push_once()
-        check(ok, f"POST ke website hasil berhasil ({sync.last_error or 'no error'})")
-        check(received.get("drivers") and received["drivers"][0]["driver"] == "Rudi",
-              "payload online berisi data pembalap")
-    except ImportError:
-        print("  skip  (flask tidak terpasang, uji online dilewati)")
+        def log_message(self, *_args):
+            pass                                  # jangan banjiri log tes
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); panel_port = s.getsockname()[1]; s.close()
+    stub = ThreadingHTTPServer(("127.0.0.1", panel_port), _IngestStub)
+    stub.daemon_threads = True
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+    time.sleep(0.3)
+
+    cfg.online_enabled = True
+    cfg.online_url = f"http://127.0.0.1:{panel_port}"
+    cfg.online_token = "tok"
+    sync = OnlineSync(engine)
+    ok = sync.push_once()
+    check(ok, f"POST ke website hasil berhasil ({sync.last_error or 'no error'})")
+    check(received.get("drivers") and received["drivers"][0]["driver"] == "Rudi",
+          "payload online berisi data pembalap")
+    stub.shutdown()
 
     httpd.shutdown()
     store.close()

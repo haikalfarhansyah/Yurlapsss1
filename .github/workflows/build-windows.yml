@@ -29,6 +29,13 @@ jobs:
           python-version: "3.12"
       - name: Install dependensi
         run: pip install pyzmq flask pyinstaller
+      - name: Pastikan paket yang diunggah versi terbaru
+        run: |
+          test -f VERSI-PAKET.txt || { echo "VERSI-PAKET.txt tidak ada: zip lama"; exit 1; }
+          grep -Eq "PATCH[[:space:]]*:[[:space:]]*tanpa-hook-nsis" VERSI-PAKET.txt || { echo "penanda paket tidak cocok: zip lama"; exit 1; }
+          if [ -f desktop/build/installer-hooks.nsh ]; then echo "hook NSIS lama masih ada"; exit 1; fi
+          grep -q '"include"' desktop/package.json && { echo "package.json masih memakai nsis.include"; exit 1; }
+          echo "OK: paket terbaru"
       - name: Verifikasi kelengkapan file
         run: python tools/verifikasi_file.py
       - name: Tes logika timing & storage
@@ -69,6 +76,29 @@ jobs:
           if (Test-Path "stintlab/stintlab.spec") { $root = "stintlab" }
           "root=$root" >> $env:GITHUB_OUTPUT
           Write-Host "Folder proyek: $root"
+
+      # Pagar anti-zip-lama: kalau yang diunggah masih paket sebelum perbaikan,
+      # build dihentikan SEKARANG dengan pesan jelas, bukan gagal 90 detik
+      # kemudian di tengah NSIS dengan pesan "File ... no files found".
+      - name: Pastikan paket yang diunggah versi terbaru
+        working-directory: ${{ steps.detect.outputs.root }}
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "VERSI-PAKET.txt")) {
+            throw "VERSI-PAKET.txt tidak ada: zip yang diunggah adalah paket lama. Unggah ulang yurlaps-0.3.0-full.zip versi terbaru."
+          }
+          $t = Get-Content "VERSI-PAKET.txt" -Raw
+          if ($t -notmatch "PATCH\s*:\s*tanpa-hook-nsis") {
+            throw "Penanda paket tidak cocok: unggah ulang zip terbaru (lihat VERSI-PAKET.txt)."
+          }
+          if (Test-Path "desktop/build/installer-hooks.nsh") {
+            throw "Masih ada desktop/build/installer-hooks.nsh: paket lama. File itu sudah dihapus di versi terbaru."
+          }
+          $pkg = Get-Content "desktop/package.json" -Raw
+          if ($pkg -match '"include"') {
+            throw "desktop/package.json masih memakai nsis.include: paket lama."
+          }
+          Write-Host "OK: paket terbaru (tanpa hook NSIS)"
 
       - name: Install dependensi Python
         working-directory: ${{ steps.detect.outputs.root }}
@@ -123,11 +153,10 @@ jobs:
           YURLAPS_PYTHON: python
         run: npx electron test/smoke.js
 
-      - name: Build installer Electron (NSIS + portable)
-        working-directory: ${{ steps.detect.outputs.root }}/desktop
-        run: npm run dist
-
       # ---- 2c. Installer Inno (jalur pembaruan /UPDATEZIP) ----
+      # Urutannya penting: Inno harus SELESAI sebelum app.asar dibangun, karena
+      # electron-builder menyalin YurLaps-Setup.exe ke dalam paketnya sebagai
+      # extraResources. Kalau urutannya dibalik, file itu belum ada.
       - name: Install Inno Setup
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.make_installer }}
         shell: pwsh
@@ -138,8 +167,16 @@ jobs:
       - name: Siapkan folder dist untuk Inno
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
+        run: New-Item -ItemType Directory -Force dist\YurLaps | Out-Null
+
+      - name: Build installer Electron (NSIS + portable)
+        working-directory: ${{ steps.detect.outputs.root }}/desktop
+        run: npm run dist
+
+      - name: Salin aplikasi hasil build ke dist\YurLaps (untuk Inno)
+        working-directory: ${{ steps.detect.outputs.root }}
+        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist\YurLaps | Out-Null
           Copy-Item dist-electron\win-unpacked\* dist\YurLaps\ -Recurse -Force
           if (-not (Test-Path "dist\YurLaps\YurLaps.exe")) { throw "dist\YurLaps\YurLaps.exe tidak ada" }
 

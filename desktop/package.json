@@ -63,8 +63,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "YurLaps",
-      "deleteAppDataOnUninstall": false,
-      "include": "build/installer-hooks.nsh"
+      "deleteAppDataOnUninstall": false
     }
   }
 }
