@@ -351,6 +351,51 @@ def check_workflow_tools() -> bool:
     return True
 
 
+def check_patch_lf() -> bool:
+    """Patch harus LF dan .gitattributes melindunginya.
+
+    Kegagalan nyata: di runner Windows (core.autocrlf=true) checkout menjadi
+    CRLF sehingga `git apply` menolak dengan "patch does not apply" dan setiap
+    baris konteks tampak diakhiri karakter aneh.
+    """
+    ok = True
+    patch = ROOT / "decoder" / "patch" / "rename-target.patch"
+    if not patch.is_file():
+        print("  HILANG  decoder/patch/rename-target.patch")
+        return False
+    data = patch.read_bytes()
+    if b"\r" in data:
+        print("  GAGAL    rename-target.patch berisi CR (harus LF)")
+        ok = False
+    if not data.endswith(b"\n"):
+        print("  GAGAL    rename-target.patch tidak diakhiri baris baru")
+        ok = False
+
+    attr = ROOT / ".gitattributes"
+    if not attr.is_file():
+        print("  GAGAL    .gitattributes tidak ada (patch bisa berubah CRLF di Windows)")
+        ok = False
+    else:
+        teks = attr.read_text(encoding="utf-8", errors="replace")
+        if "*.patch" not in teks or "eol=lf" not in teks:
+            print("  GAGAL    .gitattributes tidak memaksa *.patch eol=lf")
+            ok = False
+
+    # workflow harus mematikan autocrlf + punya cadangan penggantian langsung
+    wf = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(
+        encoding="utf-8", errors="replace")
+    if "core.autocrlf false" not in wf:
+        print("  GAGAL    workflow tidak mematikan core.autocrlf sebelum clone")
+        ok = False
+    if "openstint_add_decoder(YurLapsDecoder" not in wf:
+        print("  GAGAL    workflow tidak punya cadangan penggantian nama target")
+        ok = False
+
+    if ok:
+        print("  ok       patch LF + .gitattributes + workflow tahan CRLF")
+    return ok
+
+
 def check_no_external_imports() -> bool:
     """Skrip verifikasi harus jalan TANPA paket luar.
 
@@ -543,6 +588,7 @@ def main() -> int:
     ok = check_package_marker() and ok
     ok = check_workflow_tools() and ok
     ok = check_no_external_imports() and ok
+    ok = check_patch_lf() and ok
     ok = check_installer() and ok
     ok = check_nsis_hooks() and ok
     ok = check_installer_names() and ok

@@ -89,12 +89,43 @@ jobs:
         shell: msys2 {0}
         run: |
           set -eu
+          # Runner Windows memakai core.autocrlf=true -> berkas checkout menjadi
+          # CRLF, dan setiap baris konteks patch LF tidak lagi cocok
+          # ("patch does not apply"). Paksa LF untuk semua berkas teks.
+          git config --global core.autocrlf false
+          git config --global core.eol lf
           REF="$(tr -d '[:space:]' < decoder/patch/upstream-ref.txt)"
           echo "OpenStint versi: $REF"
-          git clone --depth 1 --branch "$REF" https://github.com/zsellera/openstint.git upstream
+          rm -rf upstream
+          git clone --depth 1 --branch "$REF" \
+            -c core.autocrlf=false -c core.eol=lf \
+            https://github.com/zsellera/openstint.git upstream
           cd upstream
           git rev-parse HEAD | tee ../upstream-commit.txt
-          git apply --verbose ../decoder/patch/rename-target.patch
+
+          # Jaring pengaman: kalau checkout tetap CRLF, ubah ke LF sebelum patch.
+          CR=$(tr -cd '\r' < src/CMakeLists.txt | wc -c)
+          if [ "$CR" -ne 0 ]; then
+            echo "checkout ber-CRLF ($CR baris) - mengubah ke LF"
+            # CRLF -> LF tanpa bergantung pada paket tambahan
+            tr -d '\r' < src/CMakeLists.txt > src/CMakeLists.new
+            mv src/CMakeLists.new src/CMakeLists.txt
+          fi
+
+          # Cadangan terakhir: kalau git apply tetap menolak (mis. baris
+          # konteks bergeser karena versi upstream berubah), lakukan
+          # penggantian langsung - inilah satu-satunya isi patch kita.
+          if ! git apply --verbose ../decoder/patch/rename-target.patch; then
+            echo "git apply gagal - memakai penggantian langsung"
+            sed -i 's/openstint_add_decoder(openstint_rtlsdr /openstint_add_decoder(YurLapsDecoder /' \
+              src/CMakeLists.txt
+            grep -n "openstint_add_decoder(YurLapsDecoder" src/CMakeLists.txt
+          fi
+          # Pastikan hasil akhirnya benar, apa pun jalur yang dipakai.
+          if ! grep -q "openstint_add_decoder(YurLapsDecoder main_rtlsdr.cpp" src/CMakeLists.txt; then
+            echo "GAGAL: nama target tidak berubah menjadi YurLapsDecoder"; exit 1
+          fi
+          echo "OK: target decoder bernama YurLapsDecoder"
 
       - name: Install liquid-dsp
         shell: msys2 {0}

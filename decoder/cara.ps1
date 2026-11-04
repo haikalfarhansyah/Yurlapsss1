@@ -48,16 +48,35 @@ pacman -S --needed --noconfirm \
 "@
 
 Write-Host "== 2/4 ambil sumber + patch ==" -ForegroundColor Cyan
+# Windows memakai core.autocrlf=true -> berkas checkout jadi CRLF dan patch LF
+# tidak cocok ("patch does not apply"). Matikan konversi sebelum clone.
+git config --global core.autocrlf false 2>$null
 # Catatan: langkah ini memakai git + patch dari MSYS2, jadi harus SETELAH
 # paket di langkah 1 terpasang (kalau tidak: "command not found").
 & $BASH -lc @"
 set -eu
 cd '$MSYS_HERE'
+REF=\$(tr -d '[:space:]' < decoder/patch/upstream-ref.txt)
+echo "  versi OpenStint: \$REF"
 rm -rf upstream
-git clone --depth 1 https://github.com/zsellera/openstint.git upstream
+git clone --depth 1 --branch "\$REF" -c core.autocrlf=false -c core.eol=lf \
+  https://github.com/zsellera/openstint.git upstream
 cd upstream
-for p in '$MSYS_PATCH'/*.patch; do echo "  patch: \$p"; git apply --verbose "\$p"; done
-echo "  sumber siap"
+# Jaring pengaman kalau checkout tetap CRLF
+CR=\$(tr -cd '\r' < src/CMakeLists.txt | wc -c)
+if [ "\$CR" -ne 0 ]; then
+  echo "  checkout ber-CRLF - mengubah ke LF"
+  tr -d '\r' < src/CMakeLists.txt > n.tmp; mv n.tmp src/CMakeLists.txt
+fi
+if ! git apply --verbose ../decoder/patch/rename-target.patch; then
+  echo "  git apply gagal - memakai penggantian langsung"
+  sed -i 's/openstint_add_decoder(openstint_rtlsdr /openstint_add_decoder(YurLapsDecoder /' \
+    src/CMakeLists.txt
+fi
+if ! grep -q "openstint_add_decoder(YurLapsDecoder main_rtlsdr.cpp" src/CMakeLists.txt; then
+  echo "GAGAL: nama target tidak berubah"; exit 1
+fi
+echo "  sumber siap (target YurLapsDecoder)"
 "@
 
 Write-Host "== 3/4 liquid-dsp + libfec ==" -ForegroundColor Cyan
