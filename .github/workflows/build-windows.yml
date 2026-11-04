@@ -138,6 +138,8 @@ jobs:
           if (-not $wins) { throw "Jendela aplikasi tidak muncul" }
           Stop-Process -Id $p.Id -Force
 
+      # Catatan: blok run di YAML tidak perlu escape kutip ganda. Menulis
+      # backslash + kutip justru membuat PowerShell gagal parse (sudah kejadian).
       - name: Uji EXE mode web (health + UI untuk HP/TV)
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
@@ -150,7 +152,10 @@ jobs:
             $r = Invoke-WebRequest -Uri "http://127.0.0.1:8098/api/health" -UseBasicParsing -TimeoutSec 10
             Write-Host "HEALTH:" $r.Content
             $u = Invoke-WebRequest -Uri "http://127.0.0.1:8098/" -UseBasicParsing -TimeoutSec 10
-            if ($u.Content -notmatch "data-view=\"decoder\"" -or $u.Content -notmatch "data-view=\"practice\"") {
+            $html = $u.Content
+            $menuPractice = 'data-view="practice"'
+            $menuDecoder = 'data-view="decoder"'
+            if (-not $html.Contains($menuPractice) -or -not $html.Contains($menuDecoder)) {
               throw "UI web tidak lengkap (menu Practice/Decoder tidak ditemukan)"
             }
             Write-Host "UI web: Practice + Decoder OK"

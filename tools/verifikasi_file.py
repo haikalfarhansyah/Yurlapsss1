@@ -137,6 +137,22 @@ REQUIRED = [
 ]
 
 
+def check_workflow_quotes() -> bool:
+    """Blok `run: |` itu string literal YAML — `\\"` akan sampai apa adanya ke
+    PowerShell dan memicu ParserError "Unexpected token". Ini pernah kejadian."""
+    bad = []
+    for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        for i, line in enumerate(wf.read_text(encoding="utf-8").splitlines(), 1):
+            if '\\"' in line:
+                bad.append(f"{wf.name}:{i}")
+    if bad:
+        print(f"  GAGAL    escape kutip ganda di blok run: {', '.join(bad)}")
+        print("           tulis kutip apa adanya; blok run: | tidak butuh escape")
+        return False
+    print("  ok       workflow: tidak ada escape kutip ganda di blok run")
+    return True
+
+
 def check_required() -> bool:
     missing = [r for r in REQUIRED if not (ROOT / r).is_file()]
     if not missing:
@@ -182,6 +198,7 @@ def main() -> int:
     print("Verifikasi versi & kelengkapan file\n" + "-" * 56)
     ok = check_required()
     ok = check_imports() and ok
+    ok = check_workflow_quotes() and ok
     for rel, marker, desc in CHECKS:
         p = ROOT / rel
         if not p.is_file():
