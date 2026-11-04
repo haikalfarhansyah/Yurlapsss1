@@ -36,6 +36,8 @@ jobs:
           if [ -f desktop/build/installer-hooks.nsh ]; then echo "hook NSIS lama masih ada"; exit 1; fi
           grep -q '"include"' desktop/package.json && { echo "package.json masih memakai nsis.include"; exit 1; }
           echo "OK: paket terbaru"
+      - name: Cek cepat Python polos (tanpa paket apa pun)
+        run: python -S tools/verifikasi_file.py | tail -3
       - name: Verifikasi kelengkapan file
         run: python tools/verifikasi_file.py
       - name: Tes logika timing & storage

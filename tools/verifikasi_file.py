@@ -260,40 +260,123 @@ KEYWORDS = {
 }
 
 
+def _workflow_jobs_steps(text: str) -> dict[str, list[tuple[int, str, str, str]]]:
+    """Baca workflow tanpa pyyaml (skrip ini jalan sebelum dependensi dipasang).
+
+    Kembalian: {job: [(baris, nama_langkah, uses, shell), ...]}
+
+    Aturan pembacaan: setiap entri daftar ("- ") memulai langkah baru; kunci
+    `name`, `uses`, `shell` di dalam entri itu mengisi langkah tersebut.
+    Komentar dan baris blok `run: |` diabaikan karena tidak berisi kunci itu
+    pada indentasi yang sama.
+    """
+    jobs: dict[str, list[tuple[int, str, str, str]]] = {}
+    job = ""
+    cur: tuple[int, str, str, str] | None = None
+
+    def flush():
+        nonlocal cur
+        if cur and job:
+            jobs[job].append(cur)
+        cur = None
+
+    for i, raw in enumerate(text.splitlines(), 1):
+        line = raw.rstrip()
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        # kunci job: dua spasi, diakhiri ":", bukan kunci metadata workflow
+        if indent == 2 and stripped.endswith(":") and not stripped.startswith("-"):
+            flush()
+            kandidat = stripped[:-1].strip()
+            if kandidat not in ("on", "permissions", "env", "jobs", "concurrency"):
+                job = kandidat
+                jobs.setdefault(job, [])
+            else:
+                job = ""
+            continue
+        if not job:
+            continue
+
+        if stripped.startswith("- "):
+            flush()
+            cur = (i, "", "", "")
+            stripped = stripped[2:].strip()
+
+        if cur is None:
+            continue
+        line_no, name, uses, shell = cur
+        if stripped.startswith("name:"):
+            name = stripped.split(":", 1)[1].strip().strip('"\'')
+        elif stripped.startswith("uses:"):
+            uses = stripped.split(":", 1)[1].strip().strip('"\'')
+        elif stripped.startswith("shell:"):
+            shell = stripped.split(":", 1)[1].strip().strip('"\'')
+        cur = (line_no, name, uses, shell)
+    flush()
+    return jobs
+
+
 def check_workflow_tools() -> bool:
     """Alat harus DIPASANG sebelum dipakai di workflow.
 
-    Dua kegagalan nyata di proyek ini:
-      * "msys2: command not found"  -> step shell: msys2 {0} sebelum
-        msys2/setup-msys2
-      * "File ... no files found"   -> NSIS memakai berkas yang belum dibuat
-
-    Aturan yang diperiksa: setiap langkah yang memakai shell msys2 harus berada
-    setelah langkah setup-msys2 di job yang sama.
+    Kegagalan nyata di proyek ini:
+      * "msys2: command not found" -> langkah `shell: msys2 {0}` diletakkan
+        sebelum `msys2/setup-msys2`,
+      * "File ... no files found"  -> NSIS memakai berkas yang belum dibuat.
     """
-    import yaml
-
     wf = ROOT / ".github" / "workflows" / "build-windows.yml"
     if not wf.is_file():
         print("  HILANG  .github/workflows/build-windows.yml")
         return False
-    data = yaml.safe_load(wf.read_text(encoding="utf-8"))
+
+    jobs = _workflow_jobs_steps(wf.read_text(encoding="utf-8", errors="replace"))
     masalah = []
-    for job, spec in (data.get("jobs") or {}).items():
-        setup = None
-        for i, step in enumerate(spec.get("steps") or []):
-            uses = str(step.get("uses") or "")
-            shell = str(step.get("shell") or "")
+    for job, steps in jobs.items():
+        setup_done = False
+        for line_no, name, uses, shell in steps:
             if "setup-msys2" in uses:
-                setup = i
-            elif shell.startswith("msys2") and setup is None:
-                masalah.append(f"{job}: '{step.get('name')}' memakai msys2 "
-                               f"sebelum msys2/setup-msys2")
+                setup_done = True
+            elif shell.startswith("msys2") and not setup_done:
+                masalah.append(
+                    f"{job}: '{name or '(tanpa nama)'}' (baris {line_no}) "
+                    f"memakai msys2 sebelum msys2/setup-msys2")
     if masalah:
         for m in masalah:
             print(f"  GAGAL    urutan alat: {m}")
         return False
-    print("  ok       workflow: msys2 dipasang sebelum dipakai")
+    print("  ok       workflow: msys2 dipasang sebelum dipakai (tanpa pyyaml)")
+    return True
+
+
+def check_no_external_imports() -> bool:
+    """Skrip verifikasi harus jalan TANPA paket luar.
+
+    Di CI ia dipanggil sebelum `pip install`. Pernah gagal karena mengimpor
+    pyyaml ("ModuleNotFoundError: No module named 'yaml'"). Yang diizinkan
+    hanya standard library.
+    """
+    path = Path(__file__).resolve()
+    teks = path.read_text(encoding="utf-8", errors="replace")
+    stdlib = {
+        "argparse", "ast", "hashlib", "json", "os", "pathlib", "re", "shutil",
+        "subprocess", "sys", "textwrap", "time", "typing", "io", "collections",
+        "dataclasses", "functools", "itertools", "zipfile", "urllib", "tempfile",
+        "__future__",
+    }
+    luar = set()
+    for m in re.finditer(r"^\s*(?:import|from)\s+([a-zA-Z_][\w.]*)", teks, re.M):
+        root = m.group(1).split(".")[0]
+        if root not in stdlib:
+            luar.add(root)
+    luar.discard("__future__")
+    luar.discard("app")          # paket proyek sendiri, ada di repo
+    if luar:
+        print(f"  GAGAL    verifikasi_file.py mengimpor paket luar: {', '.join(sorted(luar))}")
+        return False
+    print("  ok       verifikasi_file.py hanya memakai standard library")
     return True
 
 
@@ -459,6 +542,7 @@ def main() -> int:
     ok = check_workflow_quotes() and ok
     ok = check_package_marker() and ok
     ok = check_workflow_tools() and ok
+    ok = check_no_external_imports() and ok
     ok = check_installer() and ok
     ok = check_nsis_hooks() and ok
     ok = check_installer_names() and ok
