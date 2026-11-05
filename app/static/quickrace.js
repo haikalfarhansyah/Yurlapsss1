@@ -197,6 +197,8 @@ function renderChips(){
   const t = trackAktif();
   if(t && !t.width_m) html += `<span class="chip warn">Lebar loop belum diisi — km/h tidak dihitung</span>`;
   if(!state.peserta.length) html += `<span class="chip warn">Belum ada peserta</span>`;
+  const pending = DATA.ringkasan && DATA.ringkasan.belum_terkirim || 0;
+  if(pending) html += `<span class="chip warn">${pending} race belum diunggah</span>`;
   $('chips').innerHTML = html;
   $('qrTitle').textContent = (c.nama || 'Quick Race') + (t ? ' · ' + t.name : '');
 }
@@ -1143,7 +1145,7 @@ function renderAll(){
   const namaClub = (DATA.club && DATA.club.name) || 'Club';
   $('akunNick').textContent = namaClub;
   $('akunAv').textContent = namaClub.slice(0,2).toUpperCase();
-  $('akunRole').textContent = (DATA.club && DATA.club.role ? DATA.club.role : 'leader')
+  $('akunRole').textContent = (DATA.club && DATA.club.role ? DATA.club.role : '—')
     + ' · ' + ((DATA.club && DATA.club.name) || '—');
   if(sesi){
     const belum = (DATA.ringkasan && DATA.ringkasan.belum_terkirim) || 0;
@@ -1195,7 +1197,7 @@ $('btnAkun').onclick = () => {
   const club = DATA.club || {};
   const rk = DATA.ringkasan || {};
   alert('Club aktif : ' + (club.name || '—')
-    + '\nPeran      : ' + (club.role || 'leader')
+    + '\nPeran      : ' + (club.role || '—')
     + '\nMode       : offline (data di perangkat ini)'
     + '\nSesi belum diunggah: ' + (rk.belum_terkirim == null ? '—' : rk.belum_terkirim)
     + '\n\nLogin akun dan sinkronisasi ke website belum aktif '

@@ -327,7 +327,8 @@ class RaceEngine:
                 self._selesai("disimpan")
             t = self.store.track(self.track_id) or {}
             kal = self.klasemen()
-            rid = f"r{int(time.time()*1000)}"
+            # UUID tidak bentrok antar-perangkat saat hasil diunggah ulang.
+            rid = str(uuid.uuid4())
             jumlah = sum(d["n_lap"] for d in kal)
             total = self.store.races()
             nama = (nama or "").strip() or \
