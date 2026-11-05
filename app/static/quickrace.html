@@ -628,6 +628,26 @@
         <div class="cell"><span>Gain</span><b id="decGain">1.41</b></div>
         <div class="cell"><span>Lintasan / menit</span><b id="decRate">0</b></div>
       </div>
+      <div class="big" style="margin-bottom:13px">
+        <div class="big-bar"><span>Pengaturan penerima</span>
+          <span style="margin-left:auto" id="gainDev">YurLaps Decoder</span></div>
+        <div style="padding:14px 16px">
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+            <label for="gainRange" style="font-size:9.5px;letter-spacing:.5px;font-weight:700;
+              text-transform:uppercase;color:var(--muted)">Gain tuner</label>
+            <b id="gainVal" style="font-family:'Cascadia Mono',Consolas,monospace;font-size:20px;
+              color:var(--ink);letter-spacing:-.5px">20.0 dB</b>
+            <span class="note" style="margin-left:auto" id="gainStatus">dibaca dari pengaturan</span>
+          </div>
+          <input type="range" id="gainRange" min="0" max="49.6" step="0.1" value="20"
+                 style="width:100%;accent-color:var(--blue)">
+          <div class="note" style="margin-top:8px">
+            Gain terlalu tinggi membuat penerima jenuh (RSSI mentok, lintasan hilang);
+            terlalu rendah membuat mobil terlewat. Ubah saat <b>tidak ada sesi berjalan</b> —
+            YurLaps Decoder dijalankan ulang setelah nilai disimpan.
+          </div>
+        </div>
+      </div>
       <div class="grid">
         <div class="big">
           <div class="big-bar"><span>Lintasan terakhir</span><span style="margin-left:auto" id="decLogN">0</span></div>

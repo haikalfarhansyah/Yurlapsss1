@@ -866,7 +866,14 @@ async function segarkanDecoder(){
   const d = st.decoder || {};
   decOnline = !!d.online;
   $('decEndpoint').textContent = d.endpoint || '—';
-  $('decGain').textContent = d.gain == null ? '—' : Number(d.gain).toFixed(2);
+  const g = d.gain == null ? 20 : Number(d.gain);
+  $('decGain').textContent = g.toFixed(2);
+  gainTersimpan = g;
+  if(document.activeElement !== $('gainRange')){
+    $('gainRange').value = g;
+    $('gainVal').textContent = g.toFixed(1) + ' dB';
+    $('gainStatus').textContent = 'tersimpan';
+  }
   $('decDev').textContent = d.name || 'YurLaps Decoder';
   const led = $('decLed');
   if(decOnline){
@@ -883,6 +890,61 @@ async function segarkanDecoder(){
       ? 'aktif · menunggu lintasan' : 'menunggu decoder';
   }
 }
+
+/* Gain: geser = angka di layar; lepas = konfirmasi lalu simpan.
+   Tanpa jeda/debounce: satu gerakan = satu konfirmasi (sebelumnya konfirmasi
+   bisa muncul dua kali karena nilai dikirim dari dua jalur). */
+let gainSibuk = false;
+let gainTersimpan = null;
+
+$('gainRange').oninput = e => {
+  $('gainVal').textContent = Number(e.target.value).toFixed(1) + ' dB';
+  if(gainTersimpan == null || Number(e.target.value) !== Number(gainTersimpan)){
+    $('gainStatus').textContent = 'belum disimpan';
+  }
+};
+
+$('gainRange').onchange = async e => {
+  const nilai = Number(e.target.value);
+  if(gainSibuk) return;
+  if(gainTersimpan != null && nilai === Number(gainTersimpan)){
+    if(!$('gainStatus').textContent.startsWith('disimpan')){
+      $('gainStatus').textContent = 'tidak berubah';
+    }
+    return;
+  }
+  if(sesi && sesi.status === 'live'){
+    toast('Sesi sedang berjalan — gain tidak diubah. Selesaikan sesi dulu.');
+    // kembalikan tampilan ke nilai yang benar-benar tersimpan
+    if(gainTersimpan != null){
+      $('gainRange').value = gainTersimpan;
+      $('gainVal').textContent = Number(gainTersimpan).toFixed(1) + ' dB';
+    }
+    $('gainStatus').textContent = 'tidak diubah saat sesi berjalan';
+    return;
+  }
+  const ya = confirm('Ubah gain ke ' + nilai.toFixed(1) + ' dB?\n\n'
+    + 'YurLaps Decoder akan dijalankan ulang dengan gain baru. '
+    + 'Sebaiknya lakukan saat tidak ada pembalap di lintasan.');
+  if(!ya){ segarkanDecoder(); return; }
+
+  gainSibuk = true;
+  $('gainStatus').textContent = 'menyimpan…';
+  try{
+    const r = await api('/api/decoder/gain', { gain: nilai });
+    gainTersimpan = Number(r.gain == null ? nilai : r.gain);
+    $('gainStatus').textContent = r.restarted
+      ? 'disimpan · decoder dijalankan ulang'
+      : 'disimpan · decoder tidak sedang dikelola YurLaps';
+    toast(r.message || ('Gain ' + nilai.toFixed(1) + ' dB disimpan'));
+  }catch(err){
+    $('gainStatus').textContent = 'gagal disimpan';
+    gagal(err);
+  }finally{
+    gainSibuk = false;
+  }
+  setTimeout(segarkanDecoder, 1200);
+};
 
 $('btnDecStop').onclick = () => {
   // Hentikan pengelolaan decoder oleh YurLaps (perangkat sungguhan).

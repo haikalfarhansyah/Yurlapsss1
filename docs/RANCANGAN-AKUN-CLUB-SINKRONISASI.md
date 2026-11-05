@@ -890,3 +890,36 @@ ditulis "transponder belum dipetakan" (bukan "TP —"), dan pil atas memakai
 angka antrean yang benar (`DATA.ringkasan`, bukan `DATA.club.ringkasan`).
 
 Tangkapan layar tambahan: `app-qr-11-log-luar.png` (transponder di luar peserta).
+
+### 14.9 Mengatur gain penerima
+
+Gain = penguatan tuner (dB, 0–49,6), bukan pengaturan balapan. Ada di menu
+**Decoder**, kartu "Pengaturan penerima".
+
+Cara pakai:
+
+1. Buka **Decoder** → geser slider **Gain tuner**.
+2. Angka berubah saat digeser; nilai **baru dikirim saat slider dilepas**,
+   disertai konfirmasi karena decoder akan dijalankan ulang.
+3. Status di kanan atas kartu menyatakan hasilnya:
+   - `disimpan · decoder dijalankan ulang` — YurLaps mengelola decoder,
+   - `disimpan · decoder tidak sedang dikelola YurLaps` — nilai disimpan,
+     decoder dijalankan sendiri oleh pengguna,
+   - `tidak diubah saat sesi berjalan`, `gagal disimpan`, `tidak berubah`.
+
+Jalur teknis: UI → `POST /api/decoder/gain {gain}` → `apply_gain()` membatasi
+0–49,6 dB → `cfg.save()` → `restart_later()` (jeda 1,2 s, beberapa perubahan
+cepat = satu restart) → argumen `-g <nilai>` disusun oleh
+`Config.effective_decoder_args()`.
+
+Aturan:
+
+- **Tidak bisa diubah saat sesi berjalan** (UI menolak + mengembalikan angka
+  ke nilai tersimpan). Alasannya: decoder dijalankan ulang dapat memutus
+  pencatatan lap yang sedang berlangsung.
+- Gain terlalu tinggi membuat penerima jenuh (RSSI mentok, lintasan hilang);
+  terlalu rendah membuat mobil terlewat. Ini sifat perangkat, bukan bug.
+- Tanpa dongle terpasang, nilai tetap tersimpan dan dipakai saat decoder
+  dijalankan — UI menyebut terus terang "menunggu decoder".
+
+Tangkapan layar: `app-qr-14-gain.png`.

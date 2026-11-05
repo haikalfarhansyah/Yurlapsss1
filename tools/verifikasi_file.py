@@ -567,6 +567,10 @@ def check_app_offline() -> bool:
         if "segarkanDecoder" not in t:
             print("  GAGAL   halaman Decoder tidak membaca keadaan mesin (/api/state)")
             ok = False
+        # gain harus bisa diatur dari layar, bukan hanya ditampilkan
+        if "gainRange" not in html or "/api/decoder/gain" not in t:
+            print("  GAGAL   pengatur gain tidak tersambung ke /api/decoder/gain")
+            ok = False
         # membuka ulang aplikasi di tengah balapan tidak boleh memaksa SIAP
         if "mulaiTick();" not in t or "Jangan menimpa keadaan sesi" not in t:
             print("  GAGAL   init memaksa status SIAP walau sesi masih berjalan")
