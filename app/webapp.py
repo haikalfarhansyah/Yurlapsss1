@@ -79,9 +79,33 @@ class AppContext:
         self.engine = engine
         self.storage = storage
         self.bus = bus
+        # --- Quick Race offline ------------------------------------------
+        # Pemilik tunggal penyimpanan club dan mesin sesi. WAJIB di sini
+        # (bukan per-request): handler HTTP dibuat ulang tiap koneksi,
+        # sehingga state sesi akan hilang kalau disimpan di handler.
+        self._club = None
+        self._race = None
+        # RLock: properti race membuat RaceEngine lewat properti club
+        self._club_lock = threading.RLock()
         self.decoder_manager = None
         self.updater = None
         self.start_time = time.time()
+
+    @property
+    def club(self):
+        with self._club_lock:
+            if self._club is None:
+                from .club import ClubStore
+                self._club = ClubStore()
+            return self._club
+
+    @property
+    def race(self):
+        with self._club_lock:
+            if self._race is None:
+                from .race import RaceEngine
+                self._race = RaceEngine(self.club)
+            return self._race
 
 
 def make_handler(ctx: AppContext):
@@ -91,6 +115,7 @@ def make_handler(ctx: AppContext):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"YurLaps/{APP_VERSION}"
         protocol_version = "HTTP/1.1"
+
 
         # -- util ---------------------------------------------------------
         def log_message(self, fmt, *args):  # senyap di konsol
@@ -195,6 +220,9 @@ def make_handler(ctx: AppContext):
                         ctx.decoder_manager.find_decoder() is not None)
                 if ctx.updater is not None:
                     snap["update"] = ctx.updater.info()
+                # nilai yang dipakai halaman Decoder (jangan menebak di UI)
+                snap["decoder"]["gain"] = cfg.decoder_gain
+                snap["decoder"]["name"] = "YurLaps Decoder"
                 snap["settings"].update({
                     "track_name": cfg.track_name,
                     "event_name": cfg.event_name,
@@ -220,6 +248,47 @@ def make_handler(ctx: AppContext):
                 if ctx.updater is None:
                     return self._json({"ok": False, "error": "updater tidak aktif"})
                 return self._json({"ok": True, "update": ctx.updater.info()})
+
+            # ---------------- Quick Race (offline) ----------------
+            if path == "/api/club":
+                return self._json({"ok": True, "club": ctx.club.club(),
+                                   "ringkasan": ctx.club.ringkasan()})
+
+            if path == "/api/club/bootstrap":
+                # satu panggilan untuk semua yang dibutuhkan UI
+                return self._json({
+                    "ok": True,
+                    "club": ctx.club.club(),
+                    "tracks": ctx.club.tracks(),
+                    "members": ctx.club.members(),
+                    "presets": ctx.club.presets(),
+                    "ringkasan": ctx.club.ringkasan(),
+                    "race": ctx.race.snapshot(),
+                })
+
+            if path == "/api/tracks":
+                return self._json({"ok": True, "tracks": ctx.club.tracks()})
+
+            if path == "/api/members":
+                return self._json({"ok": True, "members": ctx.club.members()})
+
+            if path == "/api/presets":
+                return self._json({"ok": True, "presets": ctx.club.presets()})
+
+            if path == "/api/race/state":
+                ctx.race.cek_waktu()
+                return self._json({"ok": True, "race": ctx.race.snapshot()})
+
+            if path == "/api/races":
+                tid = (qs.get("track_id") or [None])[0]
+                return self._json({"ok": True, "races": ctx.club.races(tid)})
+
+            if path.startswith("/api/races/"):
+                rid = path[len("/api/races/"):]
+                r = ctx.club.race(rid)
+                if not r:
+                    return self._err(404, "Sesi tidak ditemukan")
+                return self._json({"ok": True, "race": r})
 
             if path == "/api/sessions":
                 return self._json({"ok": True,
@@ -301,6 +370,9 @@ def make_handler(ctx: AppContext):
             # --- statis ---
             if path == "/" or path == "/index.html":
                 return self._serve_static("index.html")
+            if path in ("/quickrace", "/quickrace/"):
+                # aplikasi Quick Race nyata (data dari API lokal, bukan localStorage)
+                return self._serve_static("quickrace.html")
             if path.startswith("/static/"):
                 return self._serve_static(path[len("/static/"):])
             if path == "/favicon.ico":
@@ -319,6 +391,119 @@ def make_handler(ctx: AppContext):
             if not self._token_ok(qs):
                 return self._err(401, "Token akses salah")
             data = self._body_json()
+
+            # ---------------- Quick Race (offline) ----------------
+            if path == "/api/race/track":
+                try:
+                    ctx.race.set_track(data.get("track_id") or "")
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": True, "race": ctx.race.snapshot()})
+
+            if path == "/api/race/cfg":
+                ctx.race.set_cfg(data)
+                return self._json({"ok": True, "race": ctx.race.snapshot()})
+
+            if path == "/api/race/peserta":
+                try:
+                    ctx.race.set_peserta(data.get("peserta") or [])
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": True, "race": ctx.race.snapshot()})
+
+            if path == "/api/race/start":
+                try:
+                    snap = ctx.race.mulai()
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": True, "race": snap})
+
+            if path == "/api/race/go":
+                try:
+                    snap = ctx.race.go()
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": True, "race": snap})
+
+            if path == "/api/race/pass":
+                tid = data.get("transponder")
+                if tid in (None, ""):
+                    return self._err(400, "transponder wajib")
+                ctx.race.cek_waktu()
+                # simulasi: khusus tombol uji UI, bukan masukan decoder
+                uji = 8600 + (int(time.time() * 1000) % 2000) if data.get("simulasi") else None
+                hasil = ctx.race.catat(int(tid),
+                                        rssi=float(data.get("rssi") or -52.0),
+                                        dur_us=data.get("dur_us"),
+                                        paksa_lap_ms=uji)
+                return self._json({"ok": True, "hasil": hasil,
+                                   "race": ctx.race.snapshot()})
+
+            if path == "/api/race/finish":
+                try:
+                    snap = ctx.race.selesai(data.get("alasan") or "dihentikan operator")
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": True, "race": snap})
+
+            if path == "/api/race/reset":
+                return self._json({"ok": True, "race": ctx.race.reset()})
+
+            if path == "/api/race/save":
+                try:
+                    info = ctx.race.simpan(data.get("nama"))
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": True, "tersimpan": info,
+                                   "ringkasan": ctx.club.ringkasan()})
+
+            if path == "/api/race/discard":
+                ctx.race.buang()
+                return self._json({"ok": True, "race": ctx.race.snapshot()})
+
+            if path == "/api/race/upload":
+                # Offline: tidak ada jaringan. Yang ditandai hanya status lokal,
+                # supaya tombol di UI berperilaku jujur (lihat pesan di UI).
+                rid = data.get("id") or ""
+                if not rid:
+                    return self._err(400, "id sesi wajib")
+                return self._err(409, "Belum ada koneksi ke website. "
+                                      "Sesi tetap tersimpan lokal dan bisa "
+                                      "diunggah setelah fitur daring aktif.")
+
+            if path == "/api/track":
+                try:
+                    t = ctx.club.save_track(data)
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": True, "track": t, "tracks": ctx.club.tracks()})
+
+            if path == "/api/track/delete":
+                try:
+                    ok = ctx.club.delete_track(data.get("id") or "")
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": ok, "tracks": ctx.club.tracks()})
+
+            if path == "/api/tracks/sync":
+                n = ctx.club.mark_tracks_synced()
+                return self._err(409, f"{n} track ditandai siap sinkron. "
+                                      "Belum ada koneksi ke website.")
+
+            if path == "/api/preset":
+                try:
+                    pr = ctx.club.save_preset(data)
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": True, "preset": pr,
+                                   "presets": ctx.club.presets()})
+
+            if path == "/api/preset/delete":
+                try:
+                    ok = ctx.club.delete_preset(data.get("id") or "")
+                except ValueError as e:
+                    return self._err(400, str(e))
+                return self._json({"ok": ok, "presets": ctx.club.presets()})
 
             if path == "/api/driver":
                 tid = data.get("transponder_id")

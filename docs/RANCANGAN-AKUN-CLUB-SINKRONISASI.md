@@ -759,3 +759,134 @@ Data contoh (member, track, preset) di dalam berkas; sesi tersimpan memakai
 Tangkapan layar: `ui-qr-1-countdown.png`, `ui-qr-2-live.png`,
 `ui-qr-3-peserta.png`, `ui-qr-4-save.png`, `ui-qr-5-history.png`,
 `ui-qr-6-track.png`, `ui-qr-7-detail-sesi.png`.
+
+---
+
+## 14. Aplikasi nyata — Quick Race full offline
+
+Bagian ini menggantikan pemakaian `localStorage` pada mockup. Aplikasi
+sungguhan menyimpan data club dan hasil race di **SQLite** lewat API lokal,
+sehingga data tidak hilang saat peramban dibersihkan dan siap disinkronkan
+begitu fitur daring dinyalakan.
+
+### 14.1 Susunan berkas
+
+| Berkas | Isi |
+|---|---|
+| `app/club.py` | `ClubStore` — SQLite club: club, track, member, preset, race, race_driver, race_lap. Skema versi 1, migrasi `BEGIN IMMEDIATE`. |
+| `app/race.py` | `RaceEngine` — satu sesi Quick Race: peserta, hitung mundur, catat lintasan, klasemen, simpan ke riwayat. |
+| `app/webapp.py` | Rute `/api/club/*`, `/api/track*`, `/api/preset*`, `/api/race/*`, halaman `/quickrace`. |
+| `app/static/quickrace.html` + `quickrace.js` | UI aplikasi. Tidak memakai `localStorage`, tidak memanggil internet. |
+| `tests/test_race_engine.py` | Uji mesin race & penyimpanan (26 pemeriksaan). |
+
+Alamat data: `<folder data>/yurlaps_club.sqlite3` — **terpisah** dari
+`yurlaps.sqlite3` milik mesin timing lama, supaya keduanya tidak saling
+merusak.
+
+### 14.2 Rute API (semua lokal, tanpa jaringan)
+
+```
+GET  /api/club                 GET  /api/club/bootstrap
+GET  /api/tracks               GET  /api/members
+GET  /api/presets              GET  /api/races[?track_id=]
+GET  /api/races/<id>           GET  /api/race/state
+POST /api/race/track           POST /api/race/cfg
+POST /api/race/peserta         POST /api/race/start
+POST /api/race/go              POST /api/race/pass
+POST /api/race/finish          POST /api/race/reset
+POST /api/race/save            POST /api/race/discard
+POST /api/track                POST /api/track/delete
+POST /api/preset               POST /api/preset/delete
+POST /api/race/upload          → 409 "belum ada koneksi" (jujur, bukan palsu)
+POST /api/tracks/sync          → 409 "belum ada koneksi"
+```
+
+`/api/health` tetap bebas token; rute lain memakai aturan token yang sudah ada
+(`?t=<token>`, header, atau cookie sesi).
+
+### 14.3 Alur yang sudah diuji ujung-ke-ujung
+
+```
+buka /quickrace → pilih track & peserta → Start → hitung mundur → GO
+→ lap tercatat (decoder / tombol uji) → Finish → simpan (nama otomatis)
+→ History Race → buka rincian per pembalap → tutup aplikasi → buka lagi
+```
+
+Hasil uji Playwright (14 langkah, seluruhnya lulus):
+
+```
+1 muat: club=Medan RC track=t-deli-oval
+2 member tampil 5
+3 peserta tersimpan 5
+4 countdown tampil 5
+5 status setelah countdown: LIVE
+6 papan 5 baris · log 9 lintasan
+7 modal simpan: 5 pembalap · 9 lap
+8 history: 1 sesi
+9 rincian: 5 baris per pembalap
+10 unggah → ditolak jujur (409, belum ada koneksi)
+11 track baru lebar 48 m → 18 km/h
+12 reload: sesi & track tetap ada (SQLite)
+13 localStorage dipakai? 0 kunci
+14 permintaan ke luar localhost: 0
+```
+
+### 14.4 Aturan yang dijaga otomatis
+
+`python3 -S tools/verifikasi_file.py` (84 pemeriksaan) kini juga menolak:
+
+- `localStorage.setItem` / `sessionStorage` di `quickrace.js`
+  (data club wajib di SQLite),
+- alamat `http(s)://` selain localhost,
+- hilangnya pesan jujur "belum ada koneksi ke website",
+- hilangnya `BEGIN IMMEDIATE` pada migrasi club,
+- hilangnya `paksa_lap_ms` (jalur tombol uji) atau `class RaceEngine`.
+
+### 14.5 Kesalahan yang sudah pernah terjadi (jangan diulang)
+
+| Gejala | Sebab | Perbaikan |
+|---|---|---|
+| Peserta & lap hilang tiap klik | `ClubStore`/`RaceEngine` dibuat per handler HTTP | disimpan di `AppContext` |
+| Aplikasi menggantung total | `RLock` kurang: properti `race` memanggil `club` yang mengunci lock sama | `threading.RLock()` |
+| Start tidak berjalan (404) | `fetch` tanpa badan memakai GET | daftar `RUTE_POST` di `quickrace.js` |
+| Lap 0,2 detik, 745 km/h | klik uji beruntun memakai jam komputer | `paksa_lap_ms` khusus tombol uji |
+| Sesi tak pernah selesai otomatis | peserta tanpa transponder ikut dihitung | hanya peserta bertransponder |
+| Member bertanda "bukan member" | `luar` diisi `not tps.length` | `luar` hanya bila bukan member club |
+
+### 14.6 Tangkapan layar aplikasi nyata
+
+`app-qr-1-siap.png`, `app-qr-2-peserta.png`, `app-qr-3-countdown.png`,
+`app-qr-4-live.png`, `app-qr-5-simpan.png`, `app-qr-6-history.png`,
+`app-qr-7-detail.png`, `app-qr-8-track.png`, `app-qr-9-member.png`,
+`app-qr-10-decoder.png`.
+
+### 14.7 Yang sengaja BELUM dikerjakan (menunggu tahap daring)
+
+- login akun & pemilihan club aktif,
+- unggah hasil ke `yurlaps.dpdns.org` (antrean sudah ada: `race.sync='belum'`),
+- sinkron track ke website,
+- penarikan member dari server (sekarang data club dari SQLite lokal),
+- decoder sungguhan mengisi lap (tombol "Lintasan (simulasi)" hanya untuk uji UI).
+
+### 14.8 Audit tampilan (2026-11-05) — yang diperbaiki
+
+Pemeriksaan ulang setiap layar menemukan delapan hal yang membuat aplikasi
+terlihat belum jadi. Semuanya sudah diperbaiki dan dikunci penjaga verifikasi.
+
+| Temuan | Akibatnya | Perbaikan |
+|---|---|---|
+| "0 sesi di track ini" padahal rekor ada | angka tidak dipercaya pengguna | `ClubStore.tracks()` menghitung `n_race` di SQL |
+| Menu Decoder: endpoint `tcp://*:5556`, gain `1.41`, status selalu "aktif" | nilai tulisan tetap, menyesatkan | dibaca dari `/api/state` (gain `20.00`, endpoint `127.0.0.1:5556`, status "menunggu decoder") |
+| Tombol Stop / Mulai ulang hanya memunculkan toast | tombol berbohong | memanggil `/api/decoder/restart` sungguhan |
+| Panel akun: nama "Budi" padahal belum ada login; avatar "RS" dari nama club | data palsu | nama club sungguhan + "lokal · belum masuk" |
+| Baris passing log memakai kelas `.pline` (tidak ada di CSS) | teks berdesakan, RSSI `-52.0` tanpa satuan | memakai `.prow`/`.skip` + satuan dB + label "luar" |
+| `#saveTrack` melipat "Sirkuit Medan RC · Layout A" jadi dua baris | modal terlihat berantakan | satu baris + ellipsis (`title` lengkap) |
+| Teks "SIAP" saat aplikasi dibuka ulang di tengah balapan | sesi seolah berhenti | status & timer dipulihkan, `mulaiTick()` jalan lagi |
+| Kotak agenda Decoder kosong tanpa keterangan | terlihat rusak | baris "Belum ada lintasan." + catatan ambang |
+
+Tambahan kecil: kalimat panduan berubah sesuai keadaan
+("Siap. Tekan Start untuk hitung mundur 5 detik."), peserta tanpa transponder
+ditulis "transponder belum dipetakan" (bukan "TP —"), dan pil atas memakai
+angka antrean yang benar (`DATA.ringkasan`, bukan `DATA.club.ringkasan`).
+
+Tangkapan layar tambahan: `app-qr-11-log-luar.png` (transponder di luar peserta).

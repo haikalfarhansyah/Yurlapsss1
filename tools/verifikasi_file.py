@@ -505,6 +505,103 @@ def check_quickrace_app() -> bool:
     return ok
 
 
+
+def check_app_offline() -> bool:
+    """Aplikasi Quick Race nyata (app/) harus tetap full offline & konsisten.
+
+    Yang dijaga di sini adalah kesalahan yang sudah pernah benar-benar terjadi:
+    - UI menyimpan data club di localStorage (harus SQLite lewat API),
+    - state sesi disimpan di handler HTTP sehingga hilang tiap permintaan,
+    - pesan tombol Unggah menjanjikan pengiriman padahal belum ada jaringan,
+    - umpan balik tombol uji memakai jam komputer (bukan waktu lap wajar).
+    """
+    import re as _re
+    ok = True
+    perlu = {
+        "app/club.py": ["class ClubStore", "def simpan_race", "def races",
+                        "BEGIN IMMEDIATE", "AS n_race"],
+        "app/race.py": ["class RaceEngine", "def catat", "def klasemen",
+                        "def simpan", "paksa_lap_ms"],
+        "app/static/quickrace.html": ['id="cdLayer"', 'id="modalSave"',
+                                      'id="view-history"', 'id="modalPeserta"',
+                                      'id="view-track"', "quickrace.js"],
+        "app/static/quickrace.js": ["/api/race/start", "/api/race/go",
+                                    "/api/race/finish", "/api/race/save",
+                                    "/api/club/bootstrap", "RUTE_POST"],
+        "app/webapp.py": ["/api/race/state", "/api/race/pass",
+                          "/api/tracks/sync", "self._club_lock"],
+    }
+    for rel, tanda in perlu.items():
+        f = ROOT / rel
+        if not f.is_file():
+            print(f"  HILANG  {rel}")
+            ok = False
+            continue
+        t = f.read_text(encoding="utf-8", errors="replace")
+        kurang = [x for x in tanda if x not in t]
+        if kurang:
+            print(f"  GAGAL   {rel:28s} belum memuat: {', '.join(kurang)}")
+            ok = False
+
+    js = ROOT / "app" / "static" / "quickrace.js"
+    if js.is_file():
+        t = js.read_text(encoding="utf-8", errors="replace")
+        # data club tidak boleh disimpan di peramban
+        for pola, sebab in (
+            (r"localStorage\.setItem", "menyimpan data club di localStorage"),
+            (r"sessionStorage\.", "menyimpan state di sessionStorage"),
+            (r"https?://(?!127\.0\.0\.1|localhost)", "memanggil alamat internet"),
+        ):
+            if _re.search(pola, t):
+                print(f"  GAGAL   quickrace.js {sebab}")
+                ok = False
+        # kelas CSS harus benar-benar ada (baris log pernah memakai .pline
+        # yang tidak punya gaya -> teks berdesakan)
+        html = (ROOT / "app" / "static" / "quickrace.html").read_text(
+            encoding="utf-8", errors="replace")
+        for kelas in ("pline",):
+            if f'class="{kelas}"' in t or f"class=\"{kelas}" in t:
+                print(f"  GAGAL   quickrace.js memakai kelas CSS .{kelas} yang tidak ada")
+                ok = False
+        # nilai halaman Decoder harus dibaca dari /api/state, bukan ditulis tetap
+        if "segarkanDecoder" not in t:
+            print("  GAGAL   halaman Decoder tidak membaca keadaan mesin (/api/state)")
+            ok = False
+        # membuka ulang aplikasi di tengah balapan tidak boleh memaksa SIAP
+        if "mulaiTick();" not in t or "Jangan menimpa keadaan sesi" not in t:
+            print("  GAGAL   init memaksa status SIAP walau sesi masih berjalan")
+            ok = False
+        # tombol Unggah harus jujur: belum ada jaringan
+        if "Belum ada koneksi ke website" not in (ROOT / "app" / "webapp.py").read_text(
+                encoding="utf-8", errors="replace"):
+            print("  GAGAL   pesan unggah offline hilang dari app/webapp.py")
+            ok = False
+    if ok:
+        print("  ok      aplikasi Quick Race offline (SQLite + API lokal, tanpa localStorage)")
+    return ok
+
+
+
+def check_gitignore() -> bool:
+    """Arsip repo tidak boleh ikut membawa dependensi & hasil build.
+
+    Pernah terjadi: zip paket ikut menyeret ``desktop/node_modules`` sampai
+    205 MB. Untuk repo GitHub akibatnya lebih buruk (riwayat membengkak dan
+    tidak bisa ditarik kembali), jadi aturannya dijaga di sini.
+    """
+    f = ROOT / ".gitignore"
+    if not f.is_file():
+        print("  HILANG  .gitignore")
+        return False
+    t = f.read_text(encoding="utf-8", errors="replace")
+    wajib = ["node_modules/", "*.sqlite3", "__pycache__/", "build/", "dist/"]
+    kurang = [w for w in wajib if w not in t]
+    if kurang:
+        print(f"  GAGAL   .gitignore belum mengecualikan: {', '.join(kurang)}")
+        return False
+    print("  ok      .gitignore menahan node_modules, database & hasil build")
+    return True
+
 def check_data_update_rules() -> bool:
     """Aturan data saat update harus tertulis DAN tidak dilanggar installer.
 
@@ -806,6 +903,8 @@ def main() -> int:
     ok = check_single_workflow() and ok
     ok = check_data_update_rules() and ok
     ok = check_quickrace_app() and ok
+    ok = check_app_offline() and ok
+    ok = check_gitignore() and ok
     ok = check_ui_mockup() and ok
     ok = check_design_decisions() and ok
     ok = check_design_doc() and ok

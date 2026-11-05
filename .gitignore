@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.spec.bak
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+.env
+
+# komponen pihak ketiga (diunduh saat build)
+vendor/
+
+# dependensi & hasil build desktop (JANGAN diunggah — 500+ MB)
+node_modules/
+desktop/dist/
+desktop/out/
+desktop/*.log
+npm-debug.log*
+
+# data uji lokal & arsip paket
+*.zip
+*.log
+.DS_Store
+Thumbs.db
