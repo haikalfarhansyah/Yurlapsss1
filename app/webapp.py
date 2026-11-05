@@ -368,11 +368,14 @@ def make_handler(ctx: AppContext):
                 return self._stream(qs)
 
             # --- statis ---
-            if path == "/" or path == "/index.html":
-                return self._serve_static("index.html")
-            if path in ("/quickrace", "/quickrace/"):
-                # aplikasi Quick Race nyata (data dari API lokal, bukan localStorage)
+            if path in ("/", "/index.html", "/quickrace", "/quickrace/"):
+                # UI utama = Quick Race (Quick Race, History, Member, Track,
+                # Decoder), sama dengan tangkapan layar di docs/app-qr-*.png.
+                # Data dari API lokal, bukan localStorage.
                 return self._serve_static("quickrace.html")
+            if path in ("/practice", "/practice/", "/lama", "/lama/"):
+                # UI lama (Practice/Driver/Decoder), disimpan sebagai cadangan
+                return self._serve_static("index.html")
             if path.startswith("/static/"):
                 return self._serve_static(path[len("/static/"):])
             if path == "/favicon.ico":

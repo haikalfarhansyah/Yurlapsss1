@@ -89,7 +89,10 @@ def main():
     # --- UI statis -------------------------------------------------------
     with urllib.request.urlopen(base + "/", timeout=5) as r:
         html = r.read().decode()
-    check("YurLaps" in html and "EventSource" in html, "UI tersaji di /")
+    check("YurLaps" in html and 'id="view-quickrace"' in html, "UI Quick Race tersaji di /")
+    with urllib.request.urlopen(base + "/practice", timeout=5) as r:
+        html_lama = r.read().decode()
+    check("YurLaps" in html_lama and "EventSource" in html_lama, "UI lama tersaji di /practice")
 
     # --- simulasi lap nyata lewat ZMQ + SSE ------------------------------
     cfg.port = port

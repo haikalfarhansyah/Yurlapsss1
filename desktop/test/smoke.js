@@ -5,7 +5,7 @@
  * Yang diperiksa — semuanya hal yang tidak bisa dijamin oleh uji Python:
  *   1. mesin Python benar-benar dijalankan dan mengirim {"event":"ready"}
  *   2. jendela memuat URL mesin dan selesai memuat (did-finish-load)
- *   3. UI yang tampil adalah UI YurLaps (menu Practice/Driver/Decoder ada)
+ *   3. UI yang tampil adalah UI YurLaps (menu Quick Race/History/Member/Track/Decoder ada)
  *   4. mesin dimatikan rapi saat aplikasi ditutup (tidak ada proses yatim)
  *   5. port hanya 127.0.0.1 (tidak terbuka ke jaringan)
  *
@@ -104,9 +104,11 @@ app.whenReady().then(async () => {
   try {
     info = await win.webContents.executeJavaScript(`(() => ({
       title: document.title,
-      practice: !!document.querySelector('[data-view="practice"], [data-nav="practice"]'),
-      driver: !!document.querySelector('[data-view="driver"], [data-nav="driver"]'),
-      decoder: !!document.querySelector('[data-view="decoder"], [data-nav="decoder"]'),
+      quickrace: !!document.querySelector('[data-view="quickrace"]'),
+      history: !!document.querySelector('[data-view="history"]'),
+      member: !!document.querySelector('[data-view="member"]'),
+      track: !!document.querySelector('[data-view="track"]'),
+      decoder: !!document.querySelector('[data-view="decoder"]'),
       shell: !!(window.yurlapsShell && window.yurlapsShell.isAppWindow),
       bodyText: (document.body.innerText || '').slice(0, 120).replace(/\\s+/g, ' '),
     }))()`);
@@ -115,8 +117,10 @@ app.whenReady().then(async () => {
   }
 
   check('judul halaman YurLaps', /YurLaps/i.test(info.title || ''), info.title);
-  check('menu Practice ada', !!info.practice);
-  check('menu Driver ada', !!info.driver);
+  check('menu Quick Race ada', !!info.quickrace);
+  check('menu History ada', !!info.history);
+  check('menu Member ada', !!info.member);
+  check('menu Track ada', !!info.track);
   check('menu Decoder ada', !!info.decoder);
   check('preload aktif (mode aplikasi)', !!info.shell);
   check('UI ada isinya', (info.bodyText || '').length > 10, info.bodyText);
