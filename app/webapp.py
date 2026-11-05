@@ -489,9 +489,8 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": ok, "tracks": ctx.club.tracks()})
 
             if path == "/api/tracks/sync":
-                n = ctx.club.mark_tracks_synced()
-                return self._err(409, f"{n} track ditandai siap sinkron. "
-                                      "Belum ada koneksi ke website.")
+                return self._err(409, "Belum ada koneksi ke website. "
+                                      "Track tetap tersimpan lokal dan belum disinkronkan.")
 
             if path == "/api/preset":
                 try:

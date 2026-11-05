@@ -22,12 +22,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
 from .config import default_data_dir
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -122,7 +123,7 @@ CREATE INDEX IF NOT EXISTS idx_lap_race ON race_lap (race_id, transponder);
 CREATE INDEX IF NOT EXISTS idx_rd_race  ON race_driver (race_id);
 """
 
-# Data contoh supaya aplikasi bisa langsung dipakai tanpa koneksi.
+# Fixture data contoh untuk pengujian; tidak dimasukkan ke database pengguna.
 CONTOH_TRACK = [
     ("t-medan-a", "Sirkuit Medan RC · Layout A", "Jl. Gatot Subroto, Medan", 42.0,
      "4 tikungan, aspal", 9402, "Budi", 1),
@@ -178,6 +179,10 @@ class ClubStore:
             if v < 1:
                 # bentuk awal; tabel sudah dibuat oleh SCHEMA
                 pass
+            if v < 2:
+                # Race lama sengaja tidak dihubungkan otomatis: klub asalnya
+                # tidak dapat dibuktikan dari database versi sebelumnya.
+                conn.execute("ALTER TABLE race ADD COLUMN club_id TEXT")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.execute("COMMIT")
         except Exception:
@@ -188,23 +193,12 @@ class ClubStore:
         return dibuat
 
     def _seed(self) -> None:
-        """Isi data contoh hanya bila tabel masih kosong (sekali saja)."""
+        """Siapkan preset balapan tanpa membuat club, track, atau member palsu."""
         c = self._conn
         now = time.time()
         if not c.execute("SELECT 1 FROM club WHERE id = 1").fetchone():
             c.execute("INSERT INTO club (id, club_id, name, role, synced_at) "
-                      "VALUES (1, 'club-medan', 'Medan RC', 'leader', NULL)")
-        if not c.execute("SELECT 1 FROM track LIMIT 1").fetchone():
-            for tid, name, addr, w, note, best, holder, synced in CONTOH_TRACK:
-                c.execute("INSERT INTO track (id, name, addr, width_m, note, best_ms, holder,"
-                          " synced, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                          (tid, name, addr, w, note, best, holder, synced, now))
-        if not c.execute("SELECT 1 FROM member LIMIT 1").fetchone():
-            for mid, name, nick, kelas, mobil, role, status, tps in CONTOH_MEMBER:
-                c.execute("INSERT INTO member (id, name, nick, kelas, mobil, role, status,"
-                          " transponder, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                          (mid, name, nick, kelas, mobil, role, status,
-                           json.dumps(tps), now))
+                      "VALUES (1, NULL, '', NULL, NULL)")
         if not c.execute("SELECT 1 FROM preset LIMIT 1").fetchone():
             for pid, name, target, value, rank, start, cd, sound in CONTOH_PRESET:
                 c.execute("INSERT INTO preset (id, name, target, value, rank, start_mode,"
@@ -357,15 +351,22 @@ class ClubStore:
         """Simpan sesi selesai beserta pembalap dan lap. Idempoten per id."""
         c = self._conn
         rid = race["id"]
+        existing = c.execute("SELECT club_id FROM race WHERE id = ?", (rid,)).fetchone()
+        club_id = existing["club_id"] if existing else self.club().get("club_id")
+        if club_id:
+            try:
+                club_id = str(uuid.UUID(club_id))
+            except (ValueError, TypeError, AttributeError):
+                club_id = None
         c.execute(
             "INSERT OR REPLACE INTO race (id, name, track_id, track_name, track_width,"
-            " cfg, started_at, ended_at, status, sync, remote_id)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " cfg, started_at, ended_at, status, sync, remote_id, club_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (rid, race["name"], race.get("track_id"), race.get("track_name"),
              race.get("track_width"), json.dumps(race.get("cfg") or {}),
              race["started_at"], race.get("ended_at"),
              race.get("status", "saved"), race.get("sync", "belum"),
-             race.get("remote_id")))
+             race.get("remote_id"), club_id))
         c.execute("DELETE FROM race_driver WHERE race_id = ?", (rid,))
         c.execute("DELETE FROM race_lap WHERE race_id = ?", (rid,))
         for d in race.get("drivers") or []:

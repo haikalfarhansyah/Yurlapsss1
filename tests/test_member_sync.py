@@ -1,0 +1,54 @@
+import pathlib
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from app.club import ClubStore
+from app.member_sync import refresh_members
+
+CLUB = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+MEMBER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+
+class Client:
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def _request(self, path):
+        if "club_members?" in path:
+            return [{"user_id": MEMBER, "role": "member", "status": "active"}]
+        if "profiles?" in path:
+            return [{"id": MEMBER, "full_name": "Pembalap", "nickname": "P"}]
+        if self.fail:
+            raise OSError("offline")
+        return [{"user_id": MEMBER, "transponder_id": "123", "rc_class": "Mod", "rc_brand": "RC"}]
+
+
+class MemberSyncTest(unittest.TestCase):
+    def test_refresh_and_failure_preserve_cache(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = ClubStore(pathlib.Path(folder) / "club.sqlite3")
+            try:
+                store.set_club(club_id=CLUB)
+                self.assertEqual(refresh_members(store, CLUB, Client()), 1)
+                before = store.members()
+                self.assertEqual(before[0]["transponder"], ["123"])
+                with self.assertRaises(OSError):
+                    refresh_members(store, CLUB, Client(fail=True))
+                self.assertEqual(store.members(), before)
+                incomplete = Client()
+                original = incomplete._request
+                incomplete._request = lambda path: [] if "profiles?" in path else original(path)
+                with self.assertRaises(ValueError):
+                    refresh_members(store, CLUB, incomplete)
+                self.assertEqual(store.members(), before)
+                with self.assertRaises(ValueError):
+                    refresh_members(store, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Client())
+                self.assertEqual(store.members(), before)
+            finally:
+                store.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

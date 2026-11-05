@@ -11,13 +11,14 @@ Fokus pada kesalahan yang mudah lolos kalau hanya dicoba lewat tampilan:
 from __future__ import annotations
 
 import pathlib
+import json
 import sys
 import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from app.club import ClubStore          # noqa: E402
+from app.club import ClubStore, CONTOH_MEMBER, CONTOH_TRACK  # noqa: E402
 from app.race import RaceEngine, kmh    # noqa: E402
 
 
@@ -35,6 +36,23 @@ def main() -> int:
     folder = pathlib.Path(tempfile.mkdtemp())
     db = folder / "yurlaps_club.sqlite3"
     store = ClubStore(db)
+    cek("club baru tidak berisi data contoh", not store.club()["name"])
+    cek("track baru kosong", not store.tracks())
+    cek("member baru kosong", not store.members())
+
+    # Fixture hanya untuk pengujian, bukan data awal pada perangkat pengguna.
+    store.set_club(club_id="club-medan", name="Medan RC", role="leader")
+    for tid, name, addr, width, note, best, holder, synced in CONTOH_TRACK:
+        store._conn.execute(
+            "INSERT INTO track (id, name, addr, width_m, note, best_ms, holder, synced, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (tid, name, addr, width, note, best, holder, synced, time.time()))
+    for mid, name, nick, kelas, mobil, role, status, tps in CONTOH_MEMBER:
+        store._conn.execute(
+            "INSERT INTO member (id, name, nick, kelas, mobil, role, status, transponder, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (mid, name, nick, kelas, mobil, role, status, json.dumps(tps), time.time()))
+    store._conn.commit()
     race = RaceEngine(store)
 
     # -- data awal ---------------------------------------------------------
