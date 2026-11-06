@@ -24,14 +24,14 @@ class DecoderClient(threading.Thread):
         self.engine = engine
         self.endpoint = endpoint
         self.poll_ms = poll_ms
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self.connected = False
         self._got_message = False
         self._last_error: Optional[str] = None
         self.rx_counts = {"P": 0, "S": 0, "T": 0, "bad": 0}
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     # ------------------------------------------------------------------
     def run(self) -> None:
@@ -50,9 +50,9 @@ class DecoderClient(threading.Thread):
         sock.connect(self.endpoint)
 
         last_connect_note = 0.0
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
-                msg = sock.recv_string(zmq.NOBLOCK)
+                msg = sock.recv_string()
             except zmq.Again:
                 if not self._got_message and time.monotonic() - last_connect_note > 20:
                     last_connect_note = time.monotonic()
@@ -84,7 +84,7 @@ class DecoderClient(threading.Thread):
         kind = parts[0]
         try:
             if kind == "P":
-                if len(parts) < 4:
+                if len(parts) < 7:
                     self.rx_counts["bad"] += 1
                     return
                 self.rx_counts["P"] += 1
@@ -95,7 +95,7 @@ class DecoderClient(threading.Thread):
                     hit_count=_i(parts, 5),
                     pass_duration_us=_i(parts, 6),
                     mer=_f(parts, 7),
-                    decoder_timecode=_i(parts, 1),
+                    decoder_timecode=int(parts[1]),
                     raw=msg,
                 )
                 self.engine.on_passing(p)
@@ -137,6 +137,6 @@ def parse_passing(msg: str) -> Optional[Passing]:
         hit_count=_i(parts, 5),
         pass_duration_us=_i(parts, 6),
         mer=_f(parts, 7),
-        decoder_timecode=_i(parts, 1),
+        decoder_timecode=int(parts[1]),
         raw=msg,
     )

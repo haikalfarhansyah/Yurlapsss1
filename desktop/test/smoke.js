@@ -57,7 +57,8 @@ function waitReady(child) {
 app.whenReady().then(async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yurlaps-el-'));
   const py = process.env.YURLAPS_PYTHON || 'python3';
-  const child = spawn(py, ['-m', 'app', '--electron'], {
+  const engine = process.env.YURLAPS_ENGINE;
+  const child = spawn(engine || py, engine ? ['--electron'] : ['-m', 'app', '--electron'], {
     cwd: REPO,
     env: { ...process.env, YURLAPS_DATA: dataDir, PYTHONUNBUFFERED: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],

@@ -12,6 +12,7 @@ query ``?t=<token>``.
 from __future__ import annotations
 
 import csv
+import ipaddress
 import io
 import json
 import os
@@ -85,18 +86,34 @@ class AppContext:
         # sehingga state sesi akan hilang kalau disimpan di handler.
         self._club = None
         self._race = None
+        self._cloud = None
+        self._retired_stores = []
         # RLock: properti race membuat RaceEngine lewat properti club
         self._club_lock = threading.RLock()
         self.decoder_manager = None
         self.updater = None
         self.start_time = time.time()
+        previous_event = engine.on_event
+        def route_event(event):
+            if event.get("kind") == "passing":
+                self.race.catat(event["transponder_id"],
+                                decoder_ts=event.get("decoder_timecode"),
+                                rssi=event.get("rssi"), hit_count=event.get("hit_count"),
+                                dur_us=event.get("pass_duration_us"))
+            elif event.get("kind") == "noise":
+                self.race.observe_clock(event.get("timecode"))
+            elif event.get("kind") == "clock_reset":
+                self.race.clock_reset()
+            if previous_event:
+                previous_event(event)
+        engine.on_event = route_event
 
     @property
     def club(self):
         with self._club_lock:
             if self._club is None:
                 from .club import ClubStore
-                self._club = ClubStore()
+                self._club = ClubStore(self.cloud.database_path())
             return self._club
 
     @property
@@ -106,6 +123,32 @@ class AppContext:
                 from .race import RaceEngine
                 self._race = RaceEngine(self.club)
             return self._race
+
+    @property
+    def cloud(self):
+        with self._club_lock:
+            if self._cloud is None:
+                from .cloud import CloudService
+                from .config import default_data_dir
+                self._cloud = CloudService(default_data_dir(), self.switch_database, self.can_refresh)
+            return self._cloud
+
+    def switch_database(self, path):
+        from .club import ClubStore
+        with self._club_lock:
+            race = self._race
+            if race:
+                with race.lock:
+                    if race.status != "idle":
+                        raise ValueError("Simpan atau buang sesi race sebelum mengganti akun/club")
+            if self._club:
+                self._retired_stores.append(self._club)
+            self._club = ClubStore(path)
+            self._race = None
+
+    def can_refresh(self, path):
+        with self._club_lock:
+            return not (self._club and self._club.path == path and self._race and self._race.status != "idle")
 
 
 def make_handler(ctx: AppContext):
@@ -147,7 +190,8 @@ def make_handler(ctx: AppContext):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Access-Control-Allow-Headers",
                                  "Content-Type, X-YurLaps-Token, X-StintLab-Token")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -178,6 +222,16 @@ def make_handler(ctx: AppContext):
             except Exception:
                 return {}
 
+        def _origin_ok(self):
+            origin = self.headers.get("Origin")
+            return (not origin or origin == "http://" + self.headers.get("Host", "")) and \
+                self.headers.get("Sec-Fetch-Site") != "cross-site"
+
+        def _cloud_local(self):
+            host = urlparse("http://" + self.headers.get("Host", "")).hostname
+            return ipaddress.ip_address(self.client_address[0]).is_loopback and \
+                host in ("localhost", "127.0.0.1", "::1") and self._origin_ok()
+
         # -- routing ------------------------------------------------------
         def do_OPTIONS(self):
             self._send(204, b"", "text/plain")
@@ -187,6 +241,10 @@ def make_handler(ctx: AppContext):
             path = parsed.path
             qs = parse_qs(parsed.query)
 
+            if path.startswith("/api/") and not self._origin_ok():
+                return self._err(403, "Origin tidak diizinkan")
+            if path.startswith("/api/cloud/") and not self._cloud_local():
+                return self._err(403, "Akun hanya dapat dikelola di komputer YurLaps")
             if path == "/api/health":
                 return self._json({
                     "ok": True, "app": "YurLaps", "version": APP_VERSION,
@@ -221,6 +279,10 @@ def make_handler(ctx: AppContext):
                 if ctx.updater is not None:
                     snap["update"] = ctx.updater.info()
                 # nilai yang dipakai halaman Decoder (jangan menebak di UI)
+                names = {tp: m.get("nick") or m["name"] for m in ctx.club.members()
+                         if m.get("status") == "active" for tp in m["transponder"]}
+                snap["decoder"]["passes"] = [dict(p, driver=names.get(p["transponder_id"], p.get("driver", "")))
+                                              for p in snap["decoder"]["passes"]]
                 snap["decoder"]["gain"] = cfg.decoder_gain
                 snap["decoder"]["name"] = "YurLaps Decoder"
                 snap["settings"].update({
@@ -249,6 +311,12 @@ def make_handler(ctx: AppContext):
                     return self._json({"ok": False, "error": "updater tidak aktif"})
                 return self._json({"ok": True, "update": ctx.updater.info()})
 
+            if path == "/api/cloud/status":
+                from .cloud_entities import conflicts
+                with ctx.club.lock:
+                    pending = conflicts(ctx.club)
+                return self._json({"ok": True, "cloud": ctx.cloud.status(), "conflicts": pending})
+
             # ---------------- Quick Race (offline) ----------------
             if path == "/api/club":
                 return self._json({"ok": True, "club": ctx.club.club(),
@@ -259,6 +327,7 @@ def make_handler(ctx: AppContext):
                 return self._json({
                     "ok": True,
                     "club": ctx.club.club(),
+                    "cloud": ctx.cloud.status(),
                     "tracks": ctx.club.tracks(),
                     "members": ctx.club.members(),
                     "presets": ctx.club.presets(),
@@ -282,6 +351,15 @@ def make_handler(ctx: AppContext):
             if path == "/api/races":
                 tid = (qs.get("track_id") or [None])[0]
                 return self._json({"ok": True, "races": ctx.club.races(tid)})
+
+            if path.startswith("/api/races/") and path.endswith("/pdf"):
+                rid = path[len("/api/races/"):-4]
+                race = ctx.club.race(rid)
+                if not race:
+                    return self._err(404, "Sesi tidak ditemukan")
+                from .race_report import render_pdf
+                return self._send(200, render_pdf(race), "application/pdf",
+                                  {"Content-Disposition": 'attachment; filename="YurLaps-race.pdf"'})
 
             if path.startswith("/api/races/"):
                 rid = path[len("/api/races/"):]
@@ -393,9 +471,49 @@ def make_handler(ctx: AppContext):
             qs = parse_qs(parsed.query)
             if not self._token_ok(qs):
                 return self._err(401, "Token akses salah")
+            if not self._origin_ok():
+                return self._err(403, "Origin tidak diizinkan")
+            if path.startswith("/api/cloud/") and not self._cloud_local():
+                return self._err(403, "Akun hanya dapat dikelola di komputer YurLaps")
             data = self._body_json()
+            if not isinstance(data, dict):
+                return self._err(400, "Badan permintaan harus objek JSON")
+
+            if path.startswith("/api/cloud/"):
+                try:
+                    if path == "/api/cloud/login":
+                        return self._json({"ok": True, "url": ctx.cloud.begin_login()})
+                    if path == "/api/cloud/logout":
+                        ctx.cloud.logout()
+                    elif path == "/api/cloud/select":
+                        ctx.cloud.select_club(data.get("club_id"))
+                    elif path == "/api/cloud/sync":
+                        ctx.cloud.wake.set()
+                    elif path == "/api/cloud/resolve":
+                        from .cloud_entities import resolve
+                        resolve(ctx.club, data.get("kind"), data.get("id"), data.get("choice"))
+                        ctx.cloud.wake.set()
+                    else:
+                        return self._err(404, "Tidak ditemukan")
+                    return self._json({"ok": True, "cloud": ctx.cloud.status()})
+                except (ValueError, KeyError) as exc:
+                    return self._err(409, str(exc))
 
             # ---------------- Quick Race (offline) ----------------
+            if path == "/api/members/import":
+                try:
+                    count = ctx.club.import_members(data.get("members"))
+                except (ValueError, TypeError) as exc:
+                    return self._err(400, str(exc))
+                return self._json({"ok": True, "count": count, "members": ctx.club.members()})
+
+            if path == "/api/member":
+                try:
+                    member = ctx.club.save_member(data)
+                except (ValueError, TypeError) as exc:
+                    return self._err(400, str(exc))
+                return self._json({"ok": True, "member": member, "members": ctx.club.members()})
+
             if path == "/api/race/track":
                 try:
                     ctx.race.set_track(data.get("track_id") or "")
@@ -404,6 +522,8 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
             if path == "/api/race/cfg":
+                if ctx.race.status in ("live", "countdown"):
+                    return self._err(409, "Pengaturan race tidak bisa diubah selama sesi berjalan")
                 ctx.race.set_cfg(data)
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
@@ -429,18 +549,7 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": True, "race": snap})
 
             if path == "/api/race/pass":
-                tid = data.get("transponder")
-                if tid in (None, ""):
-                    return self._err(400, "transponder wajib")
-                ctx.race.cek_waktu()
-                # simulasi: khusus tombol uji UI, bukan masukan decoder
-                uji = 8600 + (int(time.time() * 1000) % 2000) if data.get("simulasi") else None
-                hasil = ctx.race.catat(int(tid),
-                                        rssi=float(data.get("rssi") or -52.0),
-                                        dur_us=data.get("dur_us"),
-                                        paksa_lap_ms=uji)
-                return self._json({"ok": True, "hasil": hasil,
-                                   "race": ctx.race.snapshot()})
+                return self._err(409, "Pencatatan race hanya menerima lintasan OpenStint.")
 
             if path == "/api/race/finish":
                 try:
@@ -455,6 +564,7 @@ def make_handler(ctx: AppContext):
             if path == "/api/race/save":
                 try:
                     info = ctx.race.simpan(data.get("nama"))
+                    ctx.cloud.wake.set()
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "tersimpan": info,
@@ -465,14 +575,16 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
             if path == "/api/race/upload":
-                # Offline: tidak ada jaringan. Yang ditandai hanya status lokal,
-                # supaya tombol di UI berperilaku jujur (lihat pesan di UI).
                 rid = data.get("id") or ""
-                if not rid:
-                    return self._err(400, "id sesi wajib")
-                return self._err(409, "Belum ada koneksi ke website. "
-                                      "Sesi tetap tersimpan lokal dan bisa "
-                                      "diunggah setelah fitur daring aktif.")
+                race = ctx.club.race(rid)
+                if not race:
+                    return self._err(404, "Sesi tidak ditemukan")
+                if not race.get("club_id"):
+                    return self._err(409, "Sesi lokal lama belum terikat club; tidak diunggah otomatis")
+                if not getattr(ctx, "cloud", None) or not ctx.cloud.status().get("user_id"):
+                    return self._err(409, "Login akun leader agar antrean dapat diunggah")
+                ctx.cloud.wake.set()
+                return self._json({"ok": True, "queued": True})
 
             if path == "/api/track":
                 try:
@@ -489,8 +601,10 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": ok, "tracks": ctx.club.tracks()})
 
             if path == "/api/tracks/sync":
-                return self._err(409, "Belum ada koneksi ke website. "
-                                      "Track tetap tersimpan lokal dan belum disinkronkan.")
+                if not getattr(ctx, "cloud", None) or not ctx.cloud.status().get("user_id"):
+                    return self._err(409, "Login akun leader untuk sinkronisasi; data tetap tersimpan lokal")
+                ctx.cloud.wake.set()
+                return self._json({"ok": True, "queued": True})
 
             if path == "/api/preset":
                 try:
@@ -530,6 +644,8 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": True, "state": engine.snapshot()})
 
             if path == "/api/settings":
+                if ctx.race.status in ("live", "countdown") and any(k.startswith("decoder_") or k in ("manage_decoder", "zmq_endpoint") for k in data):
+                    return self._err(409, "Pengaturan decoder terkunci selama sesi berjalan")
                 allowed = {
                     "track_name": str, "event_name": str, "zmq_endpoint": str,
                     "idle_split_seconds": int, "min_lap_seconds": float,
@@ -609,6 +725,9 @@ def make_handler(ctx: AppContext):
                 engine.log("info", f"Perangkat: {info.message}")
                 return self._json({"ok": True, "device": info.to_dict()})
 
+            if path in ("/api/decoder/gain", "/api/decoder/restart") and ctx.race.status in ("live", "countdown"):
+                return self._err(409, "Selesaikan sesi sebelum mengubah gain atau restart decoder.")
+
             if path == "/api/decoder/gain":
                 # Ubah gain tuner -> simpan -> restart openstint.exe (debounce).
                 try:
@@ -683,7 +802,8 @@ def make_handler(ctx: AppContext):
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "keep-alive")
             self.send_header("X-Accel-Buffering", "no")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
 
             q = ctx.bus.subscribe()

@@ -106,8 +106,8 @@ def test_lap_from_decoder_timestamp():
     eng2.on_passing(Passing(transponder_id=t2))
     time.sleep(0.05)
     lap3 = eng2.on_passing(Passing(transponder_id=t2))
-    check(lap3 is not None and lap3.time_ms >= 40,
-          f"tanpa timestamp tetap dihitung dari jam komputer: {lap3.time_ms if lap3 else None} ms")
+    check(lap3 is None,
+          f"tanpa timestamp tidak dihitung: {lap3.time_ms if lap3 else None} ms")
 
 
 def test_parse():
@@ -128,18 +128,18 @@ def test_engine_logic():
     eng = Engine(cfg, storage=store)
 
     # lintasan pertama -> buka stint, bukan lap
-    check(eng.on_passing(Passing(111, "OPN")) is None, "lintasan pertama buka stint")
+    check(eng.on_passing(Passing(111, "OPN", decoder_timecode=10000)) is None, "lintasan pertama buka stint")
     eng.drivers[111].last_pass_mono -= 2.0   # pura-pura 2 detik lalu
-    lap = eng.on_passing(Passing(111, "OPN", rssi=-3.1, mer=11.2))
+    lap = eng.on_passing(Passing(111, "OPN", rssi=-3.1, mer=11.2, decoder_timecode=12000))
     check(lap is not None and 1900 <= lap.time_ms <= 2100, f"lap pertama ~2000ms ({lap.time_ms})")
 
     # lintasan terlalu cepat -> diabaikan
-    ghost = eng.on_passing(Passing(111, "OPN"))
+    ghost = eng.on_passing(Passing(111, "OPN", decoder_timecode=12100))
     check(ghost is None, "lap < min_lap_seconds diabaikan (anti-ghost)")
 
     # lap valid berikutnya
     eng.drivers[111].last_pass_mono -= 3.0
-    lap2 = eng.on_passing(Passing(111, "OPN"))
+    lap2 = eng.on_passing(Passing(111, "OPN", decoder_timecode=15000))
     check(lap2 is not None and lap2.seq == 2, "lap kedua tercatat (seq=2)")
 
     d = eng.drivers[111]
@@ -156,7 +156,7 @@ def test_engine_logic():
     eng.drivers[111].last_pass_mono -= 10
     eng.tick()
     check(d.current is None, "stint ditutup setelah idle")
-    eng.on_passing(Passing(111, "OPN"))
+    eng.on_passing(Passing(111, "OPN", decoder_timecode=25000))
     check(d.current is not None and d.current.index == 2, "stint #2 dibuka otomatis")
 
     # snapshot & payload online

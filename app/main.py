@@ -52,9 +52,9 @@ BANNER = r"""
 
 class YurLaps:
     def __init__(self, args):
-        self.cfg = Config.load()
         if args.data_dir:
             os.environ["YURLAPS_DATA"] = args.data_dir
+        self.cfg = Config.load()
         if args.port:
             self.cfg.port = args.port
         if args.host:
@@ -139,6 +139,8 @@ class YurLaps:
         if self.cfg.auto_check_updates and self.updater.manifest_url():
             self.updater.check_async()
 
+        self.ctx.cloud.start()
+
         # Sinkron ke website hanya kalau diminta (default: mati).
         # Tanpa ini YurLaps tidak menghubungi internet sama sekali.
         self.online = OnlineSync(self.engine)
@@ -218,12 +220,16 @@ class YurLaps:
         while not self._stop.is_set():
             try:
                 self.engine.tick()
+                if self.ctx._race is not None:
+                    self.ctx.race.cek_waktu()
             except Exception as exc:  # pragma: no cover
                 self.engine.log("error", f"tick: {exc}")
             self._stop.wait(1.0)
 
     def stop(self) -> None:
         self._stop.set()
+        if self.ctx._cloud is not None:
+            self.ctx.cloud.stop()
         for th in (self.decoder, self.online, self.supervisor):
             try:
                 if th:

@@ -20,15 +20,18 @@ Aturan yang dipegang:
 from __future__ import annotations
 
 import json
+import functools
+import math
+import uuid
+import threading
 import sqlite3
 import time
-import uuid
 from pathlib import Path
 from typing import Optional
 
 from .config import default_data_dir
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -46,7 +49,7 @@ CREATE TABLE IF NOT EXISTS track (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
     addr        TEXT,
-    width_m     REAL,                 -- keliling loop, untuk km/h
+    width_m     REAL,                 -- legacy track length; never used for speed
     note        TEXT,
     best_ms     INTEGER,
     holder      TEXT,
@@ -123,7 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_lap_race ON race_lap (race_id, transponder);
 CREATE INDEX IF NOT EXISTS idx_rd_race  ON race_driver (race_id);
 """
 
-# Fixture data contoh untuk pengujian; tidak dimasukkan ke database pengguna.
+# Data contoh supaya aplikasi bisa langsung dipakai tanpa koneksi.
 CONTOH_TRACK = [
     ("t-medan-a", "Sirkuit Medan RC · Layout A", "Jl. Gatot Subroto, Medan", 42.0,
      "4 tikungan, aspal", 9402, "Budi", 1),
@@ -148,19 +151,30 @@ CONTOH_PRESET = [
 ]
 
 
+def locked(method):
+    @functools.wraps(method)
+    def call(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+    return call
+
+
 class ClubStore:
     """Akses SQLite untuk club, track, member, preset, dan hasil balapan."""
 
     def __init__(self, path: Optional[Path] = None):
+        self.lock = threading.RLock()
         self.path = Path(path) if path else default_data_dir() / "yurlaps_club.sqlite3"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(SCHEMA)
         self.migrate()
         self._seed()
 
     # -- migrasi ---------------------------------------------------------
+    @locked
     def migrate(self) -> int:
         conn = self._conn
         v = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -179,10 +193,23 @@ class ClubStore:
             if v < 1:
                 # bentuk awal; tabel sudah dibuat oleh SCHEMA
                 pass
-            if v < 2:
-                # Race lama sengaja tidak dihubungkan otomatis: klub asalnya
-                # tidak dapat dibuktikan dari database versi sebelumnya.
-                conn.execute("ALTER TABLE race ADD COLUMN club_id TEXT")
+            # PR #2 and older cloud prototypes both used version 2 differently.
+            # Inspect columns rather than assuming what a version number means.
+            additions = {
+                "track": {"loop_width_m": "REAL", "remote_revision": "INTEGER DEFAULT 0",
+                          "mutation_id": "TEXT", "deleted": "INTEGER DEFAULT 0", "sync_error": "TEXT"},
+                "race": {"club_id": "TEXT", "result_json": "TEXT"},
+                "preset": {"remote_revision": "INTEGER DEFAULT 0", "mutation_id": "TEXT",
+                           "deleted": "INTEGER DEFAULT 0", "sync_error": "TEXT", "synced": "INTEGER DEFAULT 0"},
+                "member": {"source": "TEXT DEFAULT 'local'", "tts_name": "TEXT",
+                           "transponder_details": "TEXT DEFAULT '[]'"},
+            }
+            for table, columns in additions.items():
+                present = {r[1] for r in conn.execute("PRAGMA table_info(" + table + ")")}
+                for column, definition in columns.items():
+                    if column not in present:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_race_pending ON race(club_id, sync, status)")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.execute("COMMIT")
         except Exception:
@@ -192,13 +219,17 @@ class ClubStore:
             conn.isolation_level = lama
         return dibuat
 
+    @locked
     def _seed(self) -> None:
-        """Siapkan preset balapan tanpa membuat club, track, atau member palsu."""
+        """Isi data contoh hanya bila tabel masih kosong (sekali saja)."""
         c = self._conn
         now = time.time()
         if not c.execute("SELECT 1 FROM club WHERE id = 1").fetchone():
             c.execute("INSERT INTO club (id, club_id, name, role, synced_at) "
-                      "VALUES (1, NULL, '', NULL, NULL)")
+                      "VALUES (1, 'club-local', 'Club lokal', 'leader', NULL)")
+        if self.club().get("club_id") in (None, "club-local") and not c.execute("SELECT 1 FROM track LIMIT 1").fetchone():
+            c.execute("INSERT INTO track (id,name,synced,updated_at) VALUES (?,?,0,?)",
+                      ("t-local", "Track lokal", now))
         if not c.execute("SELECT 1 FROM preset LIMIT 1").fetchone():
             for pid, name, target, value, rank, start, cd, sound in CONTOH_PRESET:
                 c.execute("INSERT INTO preset (id, name, target, value, rank, start_mode,"
@@ -207,10 +238,12 @@ class ClubStore:
         c.commit()
 
     # -- club ------------------------------------------------------------
+    @locked
     def club(self) -> dict:
         r = self._conn.execute("SELECT * FROM club WHERE id = 1").fetchone()
         return dict(r) if r else {}
 
+    @locked
     def set_club(self, **kw) -> None:
         kolom = [k for k in ("club_id", "name", "role", "synced_at") if k in kw]
         if not kolom:
@@ -221,6 +254,7 @@ class ClubStore:
         self._conn.commit()
 
     # -- track -----------------------------------------------------------
+    @locked
     def tracks(self) -> list[dict]:
         """Daftar track + jumlah sesi per track.
 
@@ -229,16 +263,18 @@ class ClubStore:
         """
         rows = self._conn.execute(
             "SELECT t.*, (SELECT COUNT(*) FROM race r WHERE r.track_id = t.id)"
-            " AS n_race FROM track t"
+            " AS n_race FROM track t WHERE t.deleted=0"
             " ORDER BY t.synced ASC, t.name COLLATE NOCASE").fetchall()
         return [dict(r) for r in rows]
 
+    @locked
     def track(self, track_id: str) -> Optional[dict]:
         r = self._conn.execute(
             "SELECT t.*, (SELECT COUNT(*) FROM race r WHERE r.track_id = t.id)"
-            " AS n_race FROM track t WHERE t.id = ?", (track_id,)).fetchone()
+            " AS n_race FROM track t WHERE t.deleted=0 AND t.id = ?", (track_id,)).fetchone()
         return dict(r) if r else None
 
+    @locked
     def save_track(self, data: dict) -> dict:
         """Tambah atau ubah track. ``id`` kosong -> buat baru."""
         now = time.time()
@@ -259,26 +295,42 @@ class ClubStore:
                 " updated_at=? WHERE id=?",
                 (nama, data.get("addr") or "", lebar, data.get("note") or "", now, tid))
         else:
-            tid = tid or f"t{int(now*1000)}"
+            tid = tid or str(uuid.uuid4())
             self._conn.execute(
                 "INSERT INTO track (id, name, addr, width_m, note, best_ms, holder,"
                 " synced, updated_at) VALUES (?,?,?,?,?,NULL,NULL,0,?)",
                 (tid, nama, data.get("addr") or "", lebar, data.get("note") or "", now))
+        width = data.get("loop_width_m")
+        try:
+            width = float(width) if width not in (None, "") else None
+        except (TypeError, ValueError):
+            self._conn.rollback()
+            raise ValueError("Jarak antarkabel loop harus angka dalam meter")
+        if width is not None and (not math.isfinite(width) or width <= 0):
+            self._conn.rollback()
+            raise ValueError("Jarak antarkabel loop harus lebih dari nol")
+        self._conn.execute("UPDATE track SET loop_width_m=? WHERE id=?", (width, tid))
+        self._conn.execute("UPDATE track SET mutation_id=?, sync_error=NULL WHERE id=?",
+                           (str(uuid.uuid4()), tid))
         self._conn.commit()
         return self.track(tid) or {}
 
+    @locked
     def delete_track(self, track_id: str) -> bool:
-        if self._conn.execute("SELECT COUNT(*) FROM track").fetchone()[0] <= 1:
+        if self._conn.execute("SELECT COUNT(*) FROM track WHERE deleted=0").fetchone()[0] <= 1:
             raise ValueError("Minimal satu track harus ada")
-        cur = self._conn.execute("DELETE FROM track WHERE id = ?", (track_id,))
+        cur = self._conn.execute("UPDATE track SET deleted=1, synced=0, mutation_id=?, "
+                                 "sync_error=NULL WHERE id=?", (str(uuid.uuid4()), track_id))
         self._conn.commit()
         return cur.rowcount > 0
 
+    @locked
     def mark_tracks_synced(self) -> int:
         cur = self._conn.execute("UPDATE track SET synced = 1 WHERE synced = 0")
         self._conn.commit()
         return cur.rowcount
 
+    @locked
     def perbarui_rekor(self, track_id: str, best_ms: Optional[int], holder: str) -> None:
         if best_ms is None:
             return
@@ -286,11 +338,66 @@ class ClubStore:
         if not t:
             return
         if not t.get("best_ms") or best_ms < t["best_ms"]:
-            self._conn.execute("UPDATE track SET best_ms = ?, holder = ? WHERE id = ?",
-                               (best_ms, holder, track_id))
+            self._conn.execute("UPDATE track SET best_ms = ?, holder = ?, synced=0, mutation_id=? WHERE id = ?",
+                               (best_ms, holder, str(uuid.uuid4()), track_id))
             self._conn.commit()
 
     # -- member ----------------------------------------------------------
+    def member_for_transponder(self, transponder):
+        return next((m for m in self.members() if m.get("status") == "active"
+                     and str(transponder) in {str(t) for t in m.get("transponder", [])}), None)
+
+    def save_member(self, data, *, _commit=True, _source=None):
+        with self.lock:
+            name = str(data.get("name") or "").strip()
+            if not name:
+                raise ValueError("Nama pembalap wajib diisi")
+            mid = str(data.get("id") or "m-" + uuid.uuid4().hex)
+            raw = data.get("transponder", [])
+            if isinstance(raw, str):
+                raw = raw.replace(",", " ").split()
+            try:
+                ids = [int(x) for x in raw]
+            except (TypeError, ValueError):
+                raise ValueError("ID transponder harus bilangan bulat")
+            if any(x < 0 or x > 4294967295 for x in ids) or len(ids) != len(set(ids)):
+                raise ValueError("ID transponder tidak sah atau ganda")
+            members = self.members()
+            for m in members:
+                if m["id"] != mid and set(m["transponder"]) & set(ids):
+                    raise ValueError("Transponder sudah terdaftar pada " + m["name"])
+            old = next((m for m in members if m["id"] == mid), {})
+            if old.get("source") == "cloud":
+                raise ValueError("Modifikasi member akun dan transponder melalui website")
+            source = old.get("source") or _source or "local"
+            self._conn.execute(
+                "INSERT INTO member (id,name,nick,kelas,mobil,role,status,transponder,updated_at,source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+                "name=excluded.name,nick=excluded.nick,kelas=excluded.kelas,mobil=excluded.mobil,"
+                "transponder=excluded.transponder,updated_at=excluded.updated_at",
+                (mid,name,str(data.get("nick") or ""),str(data.get("kelas") or ""),
+                 str(data.get("mobil") or ""),old.get("role", "member"),
+                 old.get("status", "active"),json.dumps(ids),time.time(),source))
+            if _commit:
+                self._conn.commit()
+            return next(m for m in self.members() if m["id"] == mid)
+
+    def import_members(self, rows):
+        if not isinstance(rows, list) or len(rows) > 2000:
+            raise ValueError("Gunakan array JSON member, maksimal 2000 baris")
+        identifiers = set()
+        with self.lock, self._conn:
+            for row in rows:
+                if not isinstance(row, dict) or not row.get("id"):
+                    raise ValueError("Setiap member impor harus memiliki id dan name")
+                mid = "web-" + str(row["id"])
+                if mid in identifiers:
+                    raise ValueError("ID member ganda dalam berkas impor")
+                identifiers.add(mid)
+                self.save_member(dict(row, id=mid), _commit=False, _source="website")
+        return len(rows)
+
+    @locked
     def members(self) -> list[dict]:
         rows = self._conn.execute(
             "SELECT * FROM member ORDER BY status ASC, name COLLATE NOCASE").fetchall()
@@ -298,18 +405,22 @@ class ClubStore:
         for r in rows:
             d = dict(r)
             d["transponder"] = json.loads(d.get("transponder") or "[]")
+            d["transponder_details"] = json.loads(d.get("transponder_details") or "[]")
             out.append(d)
         return out
 
     # -- preset ----------------------------------------------------------
+    @locked
     def presets(self) -> list[dict]:
-        rows = self._conn.execute("SELECT * FROM preset ORDER BY rowid").fetchall()
+        rows = self._conn.execute("SELECT * FROM preset WHERE deleted=0 ORDER BY rowid").fetchall()
         return [dict(r) for r in rows]
 
+    @locked
     def preset(self, pid: str) -> Optional[dict]:
-        r = self._conn.execute("SELECT * FROM preset WHERE id = ?", (pid,)).fetchone()
+        r = self._conn.execute("SELECT * FROM preset WHERE deleted=0 AND id = ?", (pid,)).fetchone()
         return dict(r) if r else None
 
+    @locked
     def save_preset(self, data: dict) -> dict:
         now = time.time()
         pid = (data.get("id") or "").strip()
@@ -331,42 +442,46 @@ class ClubStore:
                 " cd=?, sound=?, updated_at=? WHERE id=?",
                 (nama, target, nilai, rank, start, cd, sound, now, pid))
         else:
-            pid = pid or f"p{int(now*1000)}"
+            pid = pid or str(uuid.uuid4())
             self._conn.execute(
                 "INSERT INTO preset (id, name, target, value, rank, start_mode, cd,"
                 " sound, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
                 (pid, nama, target, nilai, rank, start, cd, sound, now))
+        self._conn.execute("UPDATE preset SET synced=0, mutation_id=?, sync_error=NULL WHERE id=?",
+                           (str(uuid.uuid4()), pid))
         self._conn.commit()
         return self.preset(pid) or {}
 
+    @locked
     def delete_preset(self, pid: str) -> bool:
-        if self._conn.execute("SELECT COUNT(*) FROM preset").fetchone()[0] <= 1:
+        if self._conn.execute("SELECT COUNT(*) FROM preset WHERE deleted=0").fetchone()[0] <= 1:
             raise ValueError("Minimal satu preset harus ada")
-        cur = self._conn.execute("DELETE FROM preset WHERE id = ?", (pid,))
+        cur = self._conn.execute("UPDATE preset SET deleted=1, synced=0, mutation_id=?, "
+                                 "sync_error=NULL WHERE id=?", (str(uuid.uuid4()), pid))
         self._conn.commit()
         return cur.rowcount > 0
 
     # -- race ------------------------------------------------------------
+    @locked
     def simpan_race(self, race: dict) -> str:
         """Simpan sesi selesai beserta pembalap dan lap. Idempoten per id."""
         c = self._conn
         rid = race["id"]
-        existing = c.execute("SELECT club_id FROM race WHERE id = ?", (rid,)).fetchone()
+        existing = c.execute("SELECT club_id FROM race WHERE id=?", (rid,)).fetchone()
         club_id = existing["club_id"] if existing else self.club().get("club_id")
-        if club_id:
-            try:
-                club_id = str(uuid.UUID(club_id))
-            except (ValueError, TypeError, AttributeError):
-                club_id = None
+        try:
+            club_id = str(uuid.UUID(club_id)) if club_id else None
+        except (ValueError, TypeError, AttributeError):
+            club_id = None
         c.execute(
             "INSERT OR REPLACE INTO race (id, name, track_id, track_name, track_width,"
-            " cfg, started_at, ended_at, status, sync, remote_id, club_id)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " cfg, started_at, ended_at, status, sync, remote_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (rid, race["name"], race.get("track_id"), race.get("track_name"),
              race.get("track_width"), json.dumps(race.get("cfg") or {}),
              race["started_at"], race.get("ended_at"),
              race.get("status", "saved"), race.get("sync", "belum"),
-             race.get("remote_id"), club_id))
+             race.get("remote_id")))
         c.execute("DELETE FROM race_driver WHERE race_id = ?", (rid,))
         c.execute("DELETE FROM race_lap WHERE race_id = ?", (rid,))
         for d in race.get("drivers") or []:
@@ -383,9 +498,11 @@ class ClubStore:
                     " rssi, dur_us, skip) VALUES (?,?,?,?,?,?,?,0)",
                     (rid, d.get("transponder"), seq, int(lap),
                      race.get("ended_at") or race["started_at"], None, None))
+        c.execute("UPDATE race SET result_json=?, club_id=? WHERE id=?", (json.dumps(race, ensure_ascii=False), club_id, rid))
         c.commit()
         return rid
 
+    @locked
     def races(self, track_id: Optional[str] = None, limit: int = 200) -> list[dict]:
         q = ("SELECT r.*, (SELECT COUNT(*) FROM race_driver d WHERE d.race_id = r.id)"
              " AS n_driver, (SELECT COUNT(*) FROM race_lap l WHERE l.race_id = r.id)"
@@ -405,14 +522,23 @@ class ClubStore:
                 d["cfg"] = json.loads(d.get("cfg") or "{}")
             except ValueError:
                 d["cfg"] = {}
+            saved = json.loads(d.get("result_json") or "null")
+            d.pop("result_json", None)
+            if saved:
+                d["elapsed_ms"] = max(0, (saved.get("end_decoder_ts") or 0) - (saved.get("start_decoder_ts") or 0))
             out.append(d)
         return out
 
+    @locked
     def race(self, rid: str) -> Optional[dict]:
         r = self._conn.execute("SELECT * FROM race WHERE id = ?", (rid,)).fetchone()
         if not r:
             return None
         d = dict(r)
+        if d.get("result_json"):
+            saved = json.loads(d["result_json"])
+            saved.update({k: d[k] for k in ("club_id", "sync", "remote_id")})
+            return saved
         d["cfg"] = json.loads(d.get("cfg") or "{}")
         d["drivers"] = []
         for row in self._conn.execute(
@@ -421,9 +547,13 @@ class ClubStore:
             dd["laps"] = [x[0] for x in self._conn.execute(
                 "SELECT lap_ms FROM race_lap WHERE race_id = ? AND transponder = ?"
                 " ORDER BY seq", (rid, dd["transponder"]))]
+            dd["kmh"] = None
             d["drivers"].append(dd)
+        from .race_results import result_rows
+        d["drivers"] = result_rows(d["drivers"], d["cfg"])
         return d
 
+    @locked
     def tandai_terkirim(self, rid: str, remote_id: Optional[str] = None) -> bool:
         cur = self._conn.execute(
             "UPDATE race SET sync = 'terkirim', remote_id = COALESCE(?, remote_id)"
@@ -431,11 +561,13 @@ class ClubStore:
         self._conn.commit()
         return cur.rowcount > 0
 
+    @locked
     def hapus_race(self, rid: str) -> bool:
         cur = self._conn.execute("DELETE FROM race WHERE id = ?", (rid,))
         self._conn.commit()
         return cur.rowcount > 0
 
+    @locked
     def ringkasan(self) -> dict:
         c = self._conn
         return {
@@ -443,14 +575,30 @@ class ClubStore:
             "belum_terkirim": c.execute(
                 "SELECT COUNT(*) FROM race WHERE sync != 'terkirim'").fetchone()[0],
             "total_lap": c.execute("SELECT COUNT(*) FROM race_lap").fetchone()[0],
-            "tracks": c.execute("SELECT COUNT(*) FROM track").fetchone()[0],
+            "tracks": c.execute("SELECT COUNT(*) FROM track WHERE deleted=0").fetchone()[0],
             "members": c.execute("SELECT COUNT(*) FROM member").fetchone()[0],
             "track_belum_sinkron": c.execute(
                 "SELECT COUNT(*) FROM track WHERE synced = 0").fetchone()[0],
         }
 
+    @locked
     def close(self) -> None:
         try:
             self._conn.close()
         except Exception:
             pass
+
+
+# The decoder callback and ThreadingHTTPServer share this connection.
+from functools import wraps as _wraps
+
+def _locked(method):
+    @_wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+    return wrapped
+
+for _name, _method in list(vars(ClubStore).items()):
+    if callable(_method) and not _name.startswith("_"):
+        setattr(ClubStore, _name, _locked(_method))

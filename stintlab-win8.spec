@@ -17,7 +17,8 @@ import sys
 from PyInstaller.utils.hooks import collect_submodules
 
 hidden = collect_submodules("zmq") + [
-    "app.main", "app.webapp", "app.decoder", "app.online",
+    "app.main", "app.webapp", "app.cloud", "app.cloud_credentials", "app.cloud_entities",
+        "app.member_sync", "app.race_upload", "app.club", "app.race_report", "app.race_results", "app.decoder", "app.online",
     "app.decoder_manager", "app.devices", "app.updater", "app.net", "app.native",
 ]
 

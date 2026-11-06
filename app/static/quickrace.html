@@ -334,6 +334,28 @@
   #hist td:nth-child(2){white-space:normal}
   .rekap{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 10px}
   .rekap .chip{font-size:10.5px}
+
+  #boardWrap,.report-table{overflow-x:auto} #board{min-width:1060px} #board td,#board th{white-space:nowrap;font-size:11px}
+  #view-decoder .stat{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));background:#fff;border:1px solid var(--line);border-radius:12px}
+  #view-decoder .grid{grid-template-columns:minmax(0,1fr) 260px} #view-decoder .big{overflow:auto}
+  #view-decoder td{font-variant-numeric:tabular-nums} #view-decoder tbody tr:nth-child(even){background:#f7f9fc}
+  #noiseChart{background:#f7f9fc;border-radius:8px} #modalSesi .dlg{width:min(1280px,96vw);max-width:1280px}
+  .report-chart{background:#fff;border:1px solid #dfe4eb;border-radius:8px;margin:18px 0;padding:16px}
+  .report-chart svg{width:100%;min-width:600px;height:auto}.report-chart{overflow:auto}.report-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px}
+  #memberForm label{display:block;font-size:12px;margin-top:12px}#memberForm input{display:block;width:100%;padding:10px;border:1px solid #d8e0e8;border-radius:6px;margin-top:5px}
+  @media(max-width:900px){#view-decoder .stat{grid-template-columns:repeat(2,1fr)}#view-decoder .grid{grid-template-columns:1fr}}
+
+  .grid > div{min-width:0} #view-quickrace .grid{grid-template-columns:minmax(0,1fr) 285px}
+  #view-quickrace .prow{grid-template-columns:72px minmax(0,1fr) 34px 32px;gap:5px}
+  #view-quickrace .laprow{display:flex;justify-content:space-between;padding:5px 2px;border-bottom:1px solid #edf1f5;font-size:12px}
+  .decoder-scroll{max-height:420px;overflow:auto}.decoder-scroll thead{position:sticky;top:0;background:white;z-index:1}
+  #view-decoder .big-bar{position:relative} #view-decoder .stat .cell{min-width:0}
+  @media(max-width:1100px){#view-quickrace .grid{grid-template-columns:minmax(0,1fr)}#view-quickrace .grid>div:last-child{display:grid;grid-template-columns:1fr 1fr;gap:14px}}
+
+  #view-quickrace .grid{grid-template-columns:minmax(0,1fr)}
+  #view-quickrace .grid>div:last-child{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.65fr);gap:16px}
+  #detailCard .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+  @media(max-width:1000px){aside{display:flex;inset:auto 0 0 0;width:100%;height:58px;padding:6px;flex-direction:row;border-top:1px solid #e2e8f0}aside .brand,aside .tag,aside .aside-foot{display:none}aside .tab{justify-content:center;padding:8px;font-size:11px;gap:5px;margin:0}.main{padding-bottom:72px}#view-quickrace .grid>div:last-child{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -450,9 +472,9 @@
               </div>
               <table id="board" style="display:none">
                 <thead><tr>
-                  <th></th><th>Pembalap / transponder</th>
-                  <th class="r">Lap</th><th class="r">Terakhir</th><th class="r">Terbaik</th>
-                  <th class="r">Rata²</th><th class="r">σ</th><th class="r">km/h</th><th class="r">Status</th>
+                  <th>Pos</th><th>Chg</th><th>Pembalap / transponder</th><th>Gap ∑</th><th>Gap Δ</th>
+                  <th>Lap</th><th>Total</th><th>Best lap</th><th>Top3 avg</th>
+                  <th>Top3 consecutive</th><th>P80 avg</th><th>Consistency</th>
                 </tr></thead>
                 <tbody id="boardBody"></tbody>
               </table>
@@ -475,6 +497,8 @@
               <div class="metric"><span>Rata-rata</span><b id="dAvg">—</b></div>
               <div class="metric"><span>Konsistensi σ</span><b id="dSig">—</b></div>
               <div class="metric"><span>Jumlah lap</span><b id="dLaps">0</b></div>
+              <div class="metric"><span>Top speed</span><b id="dTopSpeed">—</b></div>
+              <div class="metric"><span>Average speed</span><b id="dAverageSpeed">—</b></div>
             </div>
             <svg viewBox="0 0 240 46" width="100%" height="46" style="display:block;margin:2px 0 4px">
               <polyline fill="none" stroke="#e7edf4" stroke-width="1" points="0,16 240,16"/>
@@ -491,7 +515,7 @@
             </div>
             <div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap">
               <button class="btn sm" id="btnClearLog">Bersihkan log</button>
-              <button class="btn sm" id="btnSimPass">+ Lintasan (simulasi)</button>
+
             </div>
           </div>
         </div>
@@ -540,8 +564,9 @@
     <div class="page" id="view-member" style="display:none">
       <div class="head">
         <div><h1>Member</h1>
-          <div class="lead">Data member club dari penyimpanan lokal. Diubah dari website setelah fitur daring aktif.</div></div>
+          <div class="lead">Cache member dan transponder dari website. Otomatis diperbarui saat online.</div></div>
       </div>
+      <div style="display:flex;gap:8px;margin:12px 0"><button class="btn primary" id="addMember">Tambah member</button><button class="btn" id="importMembers">Impor member JSON</button><input id="memberFile" type="file" accept=".json,application/json" hidden></div>
       <div class="search">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -582,7 +607,7 @@
       <div class="chips" style="margin-bottom:12px">
         <span class="chip" id="chipTrackN">0 track</span>
         <span class="chip warn" id="chipTrackSync">0 belum disinkronkan</span>
-        <span class="chip">km/h = lebar loop ÷ waktu lintasan</span>
+        <span class="chip">km/h = jarak antarkabel ÷ passing duration × 3,6</span>
       </div>
 
       <div class="grid">
@@ -592,22 +617,17 @@
         </div>
         <div>
           <div class="side-card">
-            <h3>Contoh perhitungan</h3>
-            <div class="kv"><span>Lebar loop (keliling)</span><b>42 m</b></div>
-            <div class="kv"><span>Waktu satu lap</span><b>9.412 s</b></div>
-            <div class="kv"><span>Kecepatan</span><b style="color:var(--blue)">16 km/h</b></div>
-            <div class="note" style="margin-top:9px">
-              km/h = keliling loop ÷ waktu lap × 3,6. Contoh di atas: 42 m ÷ 9,412 s = 16 km/h.
-            </div>
-            <div class="note" style="margin-top:7px;color:#8a6a12">
-              Jangan memakai <span class="mono">pass_duration</span> (≈0,1 s) sebagai pembagi:
-              hasilnya 1.500 km/h — mustahil, karena itu waktu mobil di bawah antena,
-              bukan waktu menempuh satu loop.
-            </div>
+            <h3>Jarak antarkabel loop</h3>
+            <div class="kv"><span>Jarak kabel pertama ke kedua</span><b>0,30 m</b></div>
+            <div class="kv"><span>Passing duration</span><b>90.000 µs</b></div>
+            <div class="kv"><span>Kecepatan passing</span><b>12 km/h</b></div>
+            <div class="note">0,30 ÷ (90.000 / 1.000.000) × 3,6 = 12 km/h.
+            Ukur jarak kedua kabel searah lintasan mobil. Ini bukan panjang track.
+            Passing duration nol berarti kecepatan tidak tersedia.</div>
           </div>
           <div class="side-card">
             <h3>Catatan</h3>
-            <div class="note">Track tanpa lebar loop tetap bisa dipakai balapan — hanya kolom km/h yang kosong.</div>
+            <div class="note">Track tanpa lebar loop tetap bisa dipakai balapan — kecepatan pada detail pembalap belum tersedia.</div>
           </div>
         </div>
       </div>
@@ -618,16 +638,19 @@
       <div class="head">
         <div><h1>Decoder</h1><div class="lead">Status penerima dan pengaturan gain.</div></div>
         <div class="right">
-          <button class="btn" id="btnDecStop">Stop</button>
+
           <button class="btn primary" id="btnDecStart">Mulai ulang</button>
         </div>
       </div>
       <div class="stat">
         <div class="cell"><span>Status</span><div style="margin-top:7px"><span class="led" id="decLed"><i></i>menunggu</span></div></div>
         <div class="cell"><span>Endpoint</span><b id="decEndpoint" style="font-size:13px">—</b></div>
-        <div class="cell"><span>Gain</span><b id="decGain">1.41</b></div>
-        <div class="cell"><span>Lintasan / menit</span><b id="decRate">0</b></div>
+        <div class="cell"><span>Gain</span><b id="decGain">—</b></div>
+        <div class="cell"><span>Passing diterima</span><b id="decRate">0</b></div>
+        <div class="cell"><span>Noise decoder · dBFS</span><b id="decNoise">—</b></div>
       </div>
+      <div class="big" style="margin-bottom:16px;padding:16px"><div class="note" id="decDiagnostic">Menunggu status OpenStint…</div>
+        <svg id="noiseChart" viewBox="0 0 900 110" role="img" aria-label="Riwayat noise decoder" style="width:100%;height:110px;margin-top:10px"></svg></div>
       <div class="big" style="margin-bottom:13px">
         <div class="big-bar"><span>Pengaturan penerima</span>
           <span style="margin-left:auto" id="gainDev">YurLaps Decoder</span></div>
@@ -651,21 +674,16 @@
       <div class="grid">
         <div class="big">
           <div class="big-bar"><span>Lintasan terakhir</span><span style="margin-left:auto" id="decLogN">0</span></div>
-          <table><thead><tr><th>Transponder</th><th>Pembalap</th>
-            <th class="r">RSSI</th><th class="r">Durasi</th><th class="r">km/h</th><th class="r">Waktu</th></tr></thead>
-            <tbody id="decLogBody"></tbody></table>
+          <div class="decoder-scroll"><table><thead><tr><th>Transponder</th><th>Pembalap</th>
+            <th class="r">RSSI · dB</th><th class="r">Hit</th><th class="r" style="text-transform:none">Passing · µs</th><th class="r">Timestamp · ms</th></tr></thead>
+            <tbody id="decLogBody"></tbody></table></div>
         </div>
         <div>
           <div class="side-card"><h3>Perangkat</h3>
             <div class="kv"><span>Decoder</span><b id="decDev">YurLaps Decoder</b></div>
             <div class="kv"><span>Versi</span><b>OpenStint v260830.1</b></div>
-            <div class="kv"><span>Mode</span><b>RTL-SDR</b></div>
-            <div class="kv"><span>Frekuensi</span><b>900 MHz</b></div></div>
-          <div class="side-card"><h3>Ambang lintasan</h3>
-            <div class="kv"><span>Hit minimum</span><b>16</b></div>
-            <div class="kv"><span>Ambang RSSI</span><b>max − 6 dB</b></div>
-            <div class="note" style="margin-top:8px">Nilai ambang dipakai mesin
-              lintasan; ubah di berkas pengaturan decoder.</div></div>
+            <div class="note">Semua transponder yang terbaca muncul di log, termasuk yang belum didaftarkan.</div></div>
+          <div class="side-card"><h3>Sumber waktu</h3><div class="note">Lap dan urutan lintasan memakai timestamp OpenStint. Nama diambil dari member lokal bila tersedia. Proses aktif belum berarti data radio diterima.</div></div>
         </div>
       </div>
     </div>
@@ -785,8 +803,8 @@
       <input id="trkAddr" placeholder="Contoh: Jl. Gatot Subroto, Medan"></div>
     <div class="two">
       <div class="field"><label>Lebar loop (meter)</label>
-        <input id="trkWidth" type="number" step="0.1" min="0" placeholder="42">
-        <div class="hint">Dipakai menghitung km/h dari waktu lintasan decoder.</div></div>
+        <input id="trkWidth" type="number" step="0.01" min="0.01" placeholder="0.30">
+        <div class="hint">Jarak antarkabel loop dalam meter, searah gerak mobil; bukan panjang track.</div></div>
       <div class="field"><label>Catatan layout</label>
         <input id="trkNote" placeholder="4 tikungan, aspal"></div>
     </div>
@@ -808,13 +826,43 @@
     <div class="sub" id="sesiSub"></div>
     <div id="sesiBody"></div>
     <div class="foot">
-      <button class="btn" id="sesiClose">Tutup</button>
+      <button class="btn primary" id="sesiPdf">Export PDF</button><button class="btn" id="sesiClose">Tutup</button>
     </div>
   </div>
 </div>
 
+<div class="modal" id="modalMember" hidden><form class="dlg" id="memberForm">
+<h2 id="memberTitle">Tambah member</h2><p class="sub">Disimpan di komputer ini, bisa dipakai tanpa website.</p>
+<label>Nama lengkap<input id="memberName" required maxlength="120"></label>
+<label>Nama panggilan<input id="memberNick" maxlength="80"></label>
+<label>Kelas<input id="memberClass" maxlength="80"></label>
+<label>Mobil<input id="memberCar" maxlength="80"></label>
+<label>ID transponder<input id="memberTransponders" placeholder="Contoh: 1615544, 1712003"></label>
+<p class="note">Pisahkan beberapa ID dengan koma. Boleh kosong jika belum memiliki transponder.</p>
+<div class="foot"><button class="btn" id="memberCancel" type="button">Batal</button><button class="btn primary" type="submit">Simpan member</button></div></form></div>
 <div class="toast" id="toast"></div>
 
+<div class="modal" id="modalCloud" hidden>
+  <div class="dlg" style="max-width:560px">
+    <h2>Akun &amp; sinkronisasi</h2>
+    <p class="sub" id="cloudAccount">Login menggunakan akun website YurLaps.</p>
+    <div class="note" id="cloudStatus" role="status"></div>
+    <p class="sub">Login pertama memerlukan internet. Setelah data club tersimpan, race dapat dijalankan offline. Biarkan aplikasi terbuka agar antrean terkirim otomatis saat koneksi kembali.</p>
+    <label for="cloudClub">Club dengan role leader</label>
+    <select id="cloudClub" style="width:100%;margin:10px 0"></select>
+    <div id="cloudConflicts"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:20px">
+      <button class="btn primary" id="cloudLogin">Login melalui website</button>
+      <button class="btn" id="cloudSync">Sinkronkan sekarang</button>
+      <button class="btn danger" id="cloudLogout">Keluar akun</button>
+      <button class="btn" id="cloudClose">Tutup</button>
+    </div>
+    <a id="cloudLoginLink" target="_blank" rel="noopener noreferrer" hidden>Buka halaman login YurLaps</a>
+  </div>
+</div>
+
 <script src="/static/quickrace.js"></script>
+
+
 </body>
 </html>

@@ -4,3 +4,6 @@ pyzmq==27.2.0
 # Opsional: hanya kalau ingin jendela native pywebview saat menjalankan dari
 # source (python -m app --desktop). TIDAK dipakai oleh StintLab.exe.
 # pywebview==5.4 ; sys_platform == "win32"
+
+# Ekspor hasil race offline
+reportlab==4.4.9

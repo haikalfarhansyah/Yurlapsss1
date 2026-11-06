@@ -513,7 +513,7 @@ def check_app_offline() -> bool:
     - UI menyimpan data club di localStorage (harus SQLite lewat API),
     - state sesi disimpan di handler HTTP sehingga hilang tiap permintaan,
     - pesan tombol Unggah menjanjikan pengiriman padahal belum ada jaringan,
-    - umpan balik tombol uji memakai jam komputer (bukan waktu lap wajar).
+    - pencatatan race kehilangan timestamp decoder atau acuan GO.
     """
     import re as _re
     ok = True
@@ -521,7 +521,7 @@ def check_app_offline() -> bool:
         "app/club.py": ["class ClubStore", "def simpan_race", "def races",
                         "BEGIN IMMEDIATE", "AS n_race"],
         "app/race.py": ["class RaceEngine", "def catat", "def klasemen",
-                        "def simpan", "paksa_lap_ms"],
+                        "def simpan", "decoder_ts", "start_decoder_ts"],
         "app/static/quickrace.html": ['id="cdLayer"', 'id="modalSave"',
                                       'id="view-history"', 'id="modalPeserta"',
                                       'id="view-track"', "quickrace.js"],
@@ -575,10 +575,10 @@ def check_app_offline() -> bool:
         if "mulaiTick();" not in t or "Jangan menimpa keadaan sesi" not in t:
             print("  GAGAL   init memaksa status SIAP walau sesi masih berjalan")
             ok = False
-        # tombol Unggah harus jujur: belum ada jaringan
-        if "Belum ada koneksi ke website" not in (ROOT / "app" / "webapp.py").read_text(
+        # Tombol Unggah hanya menjadwalkan antrean; server mengonfirmasi sukses.
+        if '"queued": True' not in (ROOT / "app" / "webapp.py").read_text(
                 encoding="utf-8", errors="replace"):
-            print("  GAGAL   pesan unggah offline hilang dari app/webapp.py")
+            print("  GAGAL   kontrak antrean unggah hilang dari app/webapp.py")
             ok = False
     if ok:
         print("  ok      aplikasi Quick Race offline (SQLite + API lokal, tanpa localStorage)")

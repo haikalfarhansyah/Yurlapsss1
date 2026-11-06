@@ -27,6 +27,7 @@ class OfflineSyncTest(unittest.TestCase):
             store.close()
             # Simulate a v1 database without the new club_id column.
             conn = sqlite3.connect(path)
+            conn.execute("DROP INDEX IF EXISTS idx_race_pending")
             conn.execute("ALTER TABLE race DROP COLUMN club_id")
             conn.execute("PRAGMA user_version = 1")
             conn.close()

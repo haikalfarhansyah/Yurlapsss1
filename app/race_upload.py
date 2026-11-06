@@ -20,7 +20,9 @@ from .club import ClubStore
 
 
 class UploadError(Exception):
-    pass
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 def remote_race_id(club_id: str, local_id: str) -> str:
@@ -40,9 +42,18 @@ def race_payload(race: dict, user_id: str) -> dict:
         "location": "",
         "raced_at": raced_at,
         "created_by": user_id,
+        "source_race_id": race["id"],
+        "session_data": {"schema_version": 1, "configuration": race.get("cfg", {}),
+                         "ended_at": race.get("ended_at"), "loop_width_m": race.get("loop_width_m"),
+                         "start_decoder_ts": race.get("start_decoder_ts"),
+                         "end_decoder_ts": race.get("end_decoder_ts"),
+                         "finish_reason": race.get("finish_reason"),
+                         "drivers": race.get("drivers", [])},
         "results": [{
             "position": d.get("pos"), "driver": d.get("name"),
             "nickname": d.get("nick"), "class": d.get("kelas"),
+            "total_laps": len(d.get("laps") or []),
+            "total_ms": sum(d.get("laps") or []),
             "transponder": d.get("transponder"), "best_ms": d.get("best_ms"),
             "speed_kmh": d.get("kmh"), "laps_ms": d.get("laps") or [],
         } for d in race.get("drivers", [])],
@@ -74,22 +85,15 @@ class SupabaseRaceClient:
                 raw = response.read()
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as exc:
-            raise UploadError(f"Supabase HTTP {exc.code}") from exc
+            raise UploadError(f"Supabase HTTP {exc.code}", exc.code) from exc
         except (OSError, ValueError) as exc:
             raise UploadError("Tidak dapat menghubungi Supabase") from exc
 
     def upload(self, payload: dict) -> str:
-        # Ignore duplicates rather than overwriting an existing race. A read
-        # after the insert is required even on retries after a lost response.
-        self._request("/rest/v1/races?on_conflict=id", "POST", payload,
-                      "resolution=ignore-duplicates,return=minimal")
-        query = urllib.parse.urlencode({"select": "id,club_id", "id": "eq." + payload["id"],
-                                        "club_id": "eq." + payload["club_id"]})
-        rows = self._request("/rest/v1/races?" + query)
-        if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("id") != payload["id"] \
-                or rows[0].get("club_id") != payload["club_id"]:
-            raise UploadError("Server belum mengonfirmasi hasil untuk klub ini")
-        return payload["id"]
+        receipt = self._request("/rest/v1/rpc/desktop_upload_race", "POST", {"p_payload": payload})
+        if not isinstance(receipt, dict) or receipt.get("id") != payload["id"] or receipt.get("club_id") != payload["club_id"]:
+            raise UploadError("Server belum mengonfirmasi hasil untuk club ini")
+        return receipt["id"]
 
 
 def upload_pending(store: ClubStore, club_id: str, user_id: str, client,

@@ -32,7 +32,7 @@ def fetch_members(client, club_id: str) -> list[dict]:
     profiles, transponders = [], []
     for start in range(0, len(ids), 50):
         user_filter = "in.(" + ",".join(ids[start:start + 50]) + ")"
-        profiles.extend(_read_all(client, "profiles", {"select": "id,full_name,nickname",
+        profiles.extend(_read_all(client, "profiles", {"select": "id,full_name,nickname,tts_name",
                                   "id": user_filter, "order": "id.asc"}))
         transponders.extend(_read_all(client, "transponders", {
             "select": "user_id,transponder_id,rc_class,rc_brand", "user_id": user_filter,
@@ -51,7 +51,8 @@ def fetch_members(client, club_id: str) -> list[dict]:
         profile = by_id[mid]
         tps = devices[mid]
         members.append({"id": mid, "name": profile.get("full_name") or profile.get("nickname") or mid,
-                        "nick": profile.get("nickname") or "", "role": membership["role"],
+                        "nick": profile.get("nickname") or "", "tts_name": profile.get("tts_name") or "",
+                        "transponder_details": tps, "role": membership["role"],
                         "status": "active", "kelas": tps[0].get("rc_class", "") if tps else "",
                         "mobil": tps[0].get("rc_brand", "") if tps else "",
                         "transponder": [str(t["transponder_id"]) for t in tps]})
@@ -71,13 +72,14 @@ def refresh_members(store, club_id: str, client) -> int:
         row = conn.execute("SELECT club_id FROM club WHERE id = 1").fetchone()
         if not row or row[0] != club_id:
             raise ValueError("Klub aktif telah berubah")
-        conn.execute("DELETE FROM member")
+        conn.execute("DELETE FROM member WHERE source='cloud'")
         now = time.time()
         for m in members:
             conn.execute("INSERT INTO member (id, name, nick, kelas, mobil, role, status,"
-                         " transponder, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                         " transponder, updated_at, tts_name, transponder_details, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,'cloud')",
                          (m["id"], m["name"], m["nick"], m["kelas"], m["mobil"],
-                          m["role"], m["status"], json.dumps(m["transponder"]), now))
+                          m["role"], m["status"], json.dumps(m["transponder"]), now,
+                          m["tts_name"], json.dumps(m["transponder_details"])))
         conn.execute("UPDATE club SET synced_at = ? WHERE id = 1", (now,))
         conn.commit()
     except Exception:

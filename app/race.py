@@ -3,9 +3,8 @@
 Bertanggung jawab atas satu sesi balapan: peserta, hitung mundur, pencatatan
 lintasan, pengurutan klasemen, dan penyimpanan ke riwayat.
 
-Semua hitungan waktu memakai ``time.monotonic()`` (bukan jam dinding) supaya
-tidak terpengaruh perubahan waktu sistem di laptop sirkuit. Jam dinding hanya
-dipakai untuk mencatat kapan sesi mulai/berakhir.
+Timestamp decoder OpenStint adalah satu-satunya acuan waktu penilaian.
+Jam komputer hanya dipakai untuk tanggal arsip dan diagnostik koneksi.
 
 Tidak ada jaringan di sini.
 """
@@ -20,21 +19,13 @@ from typing import Optional
 from .club import ClubStore
 
 
-def kmh(keliling_m: Optional[float], lap_ms: Optional[int]) -> Optional[int]:
-    """Kecepatan rata-rata satu lap.
-
-    ``keliling_m / (lap_ms / 1000) * 3.6`` = km/h.
-
-    Contoh: 42 m / 9,412 s -> 16 km/h.
-
-    Catatan penting: JANGAN memakai ``pass_duration`` (lama mobil di bawah
-    antena, sekitar 0,1 s) sebagai pembagi -- hasilnya ~1.500 km/h, mustahil.
-    Nilai itu tetap disimpan sebagai ``dur_us`` untuk menilai kualitas sinyal,
-    tetapi tidak dipakai menghitung kecepatan lap.
-    """
-    if not keliling_m or not lap_ms:
+def kmh(loop_width_m: Optional[float], passing_us: Optional[int]) -> Optional[float]:
+    """Jarak antarkabel loop / durasi passing mikrodetik, dalam km/h."""
+    import math
+    if not loop_width_m or not passing_us or loop_width_m <= 0 or passing_us <= 0:
         return None
-    return round((keliling_m / (lap_ms / 1000.0)) * 3.6)
+    value = loop_width_m * 3_600_000 / passing_us
+    return round(value, 2) if math.isfinite(value) else None
 
 
 URUTAN = {
@@ -51,6 +42,7 @@ class RaceEngine:
     def __init__(self, store: ClubStore):
         self.store = store
         self.lock = threading.RLock()
+        self._track_snapshot = None
         self.status = "idle"          # idle | countdown | live | done
         self.mulai_mono = 0.0
         self.mulai_wall = 0.0
@@ -63,6 +55,30 @@ class RaceEngine:
         self.log: list[dict] = []
         self.pilihan: Optional[str] = None
         self.alasan_selesai = ""
+        self.decoder_ts = None
+        self.decoder_received_mono = 0.0
+        self.start_decoder_ts = None
+        self.end_decoder_ts = None
+        self.race_track = None
+
+    def observe_clock(self, timestamp):
+        if timestamp is None:
+            return
+        with self.lock:
+            self.decoder_ts = int(timestamp)
+            self.decoder_received_mono = time.monotonic()
+
+    def clock_reset(self):
+        with self.lock:
+            if self.status in ("live", "countdown"):
+                self._selesai("Decoder restart: timestamp direset. Mulai sesi baru.")
+            self.decoder_ts = None
+            self.decoder_received_mono = 0
+
+    def _track(self):
+        if self.status in ("countdown", "live", "done") and self._track_snapshot is not None:
+            return self._track_snapshot
+        return self.store.track(self.track_id)
 
     # -- konfigurasi -----------------------------------------------------
     def set_cfg(self, data: dict) -> dict:
@@ -129,6 +145,9 @@ class RaceEngine:
             out.sort(key=lambda x: x["no"])
             for i, p in enumerate(out, 1):
                 p["no"] = i
+            ids = [p["transponder"] for p in out if p["transponder"] is not None]
+            if len(ids) != len(set(ids)):
+                raise ValueError("Satu transponder hanya boleh dipakai satu peserta")
             self.peserta = out
             if out and not any(p["uid"] == self.pilihan for p in out):
                 self.pilihan = out[0]["uid"]
@@ -142,10 +161,15 @@ class RaceEngine:
                 raise ValueError("Pilih peserta dulu")
             if self.status == "live":
                 raise ValueError("Sesi sedang berjalan")
+            self._track_snapshot = dict(self.store.track(self.track_id) or {})
             for p in self.peserta:
                 p["laps"] = []
                 p["dur_us"] = None
                 p["terakhir_mono"] = 0.0
+                p["last_decoder_ts"] = None
+                p["first_decoder_ts"] = None
+                p["passings"] = []
+                p["finish_decoder_ts"] = None
             self.log = []
             self.akhir_wall = None
             self.alasan_selesai = ""
@@ -157,6 +181,11 @@ class RaceEngine:
         with self.lock:
             if self.status != "countdown":
                 raise ValueError("Sesi belum siap dimulai")
+            if self.decoder_ts is None or time.monotonic() - self.decoder_received_mono > 3:
+                raise ValueError("Belum ada jam decoder aktif. Tunggu status OpenStint sebelum GO.")
+            self.start_decoder_ts = self.decoder_ts
+            self.end_decoder_ts = None
+            self.race_track = dict(self.store.track(self.track_id) or {})
             self.status = "live"
             self.mulai_mono = time.monotonic()
             self.mulai_wall = time.time()
@@ -174,14 +203,17 @@ class RaceEngine:
                 p["laps"] = []
                 p["dur_us"] = None
                 p["terakhir_mono"] = 0.0
+                p["last_decoder_ts"] = None
+                p["first_decoder_ts"] = None
+                p["passings"] = []
+                p["finish_decoder_ts"] = None
             return self.snapshot()
 
     def elapsed_ms(self) -> int:
-        if self.status == "live":
-            return int((time.monotonic() - self.mulai_mono) * 1000)
-        if self.status == "done" and self.akhir_wall and self.mulai_wall:
-            return int((self.akhir_wall - self.mulai_wall) * 1000)
-        return 0
+        end = self.end_decoder_ts if self.status == "done" else self.decoder_ts
+        if self.start_decoder_ts is None or end is None or self.status not in ("live", "done"):
+            return 0
+        return max(0, end - self.start_decoder_ts)
 
     def sisa_ms(self) -> Optional[int]:
         if self.cfg.get("target") != "time":
@@ -189,60 +221,68 @@ class RaceEngine:
         return max(0, int(self.cfg.get("value", 180)) * 1000 - self.elapsed_ms())
 
     # -- lintasan --------------------------------------------------------
-    def catat(self, transponder: int, *, rssi: float = -52.0,
-              dur_us: Optional[int] = None, waktu_mono: Optional[float] = None,
-              paksa_lap_ms: Optional[int] = None) -> dict:
-        """Catat satu lintasan untuk transponder tertentu.
+    def catat(self, transponder: int, *, decoder_ts=None, rssi=None,
+              hit_count=None, dur_us=None, **unused) -> dict:
+        """Raw passing selalu terlihat, termasuk transponder di luar peserta.
 
-        ``paksa_lap_ms`` HANYA dipakai tombol "Lintasan (uji)" di UI: tanpa itu,
-        klik beruntun menghasilkan lap 0,2 detik dan kecepatan ratusan km/h yang
-        membingungkan saat menguji tampilan. Jalur decoder sungguhan tidak
-        memakai parameter ini -- waktunya selalu dari selisih lintasan nyata.
+        Penilaian hanya memakai timestamp P. Pesan terlambat/duplikat tidak
+        menggeser acuan lap. Jam penerimaan PC tidak dipakai sebagai cadangan.
         """
         with self.lock:
-            now = waktu_mono if waktu_mono is not None else time.monotonic()
             p = next((x for x in self.peserta if x["transponder"] == transponder), None)
-            if p is None:
-                # transponder di luar daftar peserta: tetap dicatat sebagai log
-                entri = {
-                    "t": int((now - self.mulai_mono) * 1000) if self.mulai_mono else 0,
-                    "jam": time.strftime("%H:%M:%S"), "transponder": transponder,
-                    "nama": f"TP {transponder}", "rssi": rssi, "lap": None,
-                    "skip": True, "dur_us": dur_us, "kmh": None,
-                }
-                self.log.insert(0, entri)
-                del self.log[60:]
-                return {"diterima": False, "alasan": "bukan peserta", "entri": entri}
-
-            if self.status != "live":
-                return {"diterima": False, "alasan": "sesi belum berjalan"}
-
-            # lap pertama dihitung sejak GO, selanjutnya selisih antar lintasan
-            acuan = p["terakhir_mono"] or self.mulai_mono
-            lap_ms = int((now - acuan) * 1000)
-            if paksa_lap_ms:
-                lap_ms = int(paksa_lap_ms)
-            if lap_ms <= 0:
-                return {"diterima": False, "alasan": "waktu tidak sah"}
-            p["terakhir_mono"] = now
-            p["laps"].append(lap_ms)
-            p["dur_us"] = dur_us
-
-            t = self.store.track(self.track_id) or {}
-            v = kmh(t.get("width_m"), lap_ms)
-            entri = {
-                "t": int((now - self.mulai_mono) * 1000),
-                "jam": time.strftime("%H:%M:%S"),
-                "transponder": transponder, "nama": p["nick"] or p["name"],
-                "rssi": rssi, "lap": len(p["laps"]), "skip": False,
-                "dur_us": dur_us, "kmh": v,
-            }
-            self.log.insert(0, entri)
+            member = self.store.member_for_transponder(transponder)
+            entry = {"transponder": transponder, "decoder_timecode": decoder_ts,
+                     "t": decoder_ts, "jam": str(decoder_ts) if decoder_ts is not None else "—",
+                     "nama": (p["nick"] or p["name"]) if p else
+                             ((member.get("nick") or member["name"]) if member else f"TP {transponder}"),
+                     "rssi": rssi, "hit_count": hit_count, "dur_us": dur_us,
+                     "lap": None, "skip": True, "kmh": None}
+            self.log.insert(0, entry)
             del self.log[60:]
-
-            selesai_otomatis = self._cek_selesai()
-            return {"diterima": True, "lap": len(p["laps"]), "lap_ms": lap_ms,
-                    "kmh": v, "entri": entri, "selesai": selesai_otomatis}
+            if decoder_ts is None or not isinstance(decoder_ts, int) or decoder_ts < 0:
+                return {"diterima": False, "alasan": "timestamp decoder tidak sah"}
+            if self.decoder_ts is None or decoder_ts > self.decoder_ts:
+                self.observe_clock(decoder_ts)
+            if not p or self.status != "live":
+                return {"diterima": False, "alasan": "bukan peserta" if not p else "sesi belum berjalan", "entri": entry}
+            if decoder_ts < self.start_decoder_ts:
+                return {"diterima": False, "alasan": "lintasan sebelum GO"}
+            if p.get("finish_decoder_ts") is not None:
+                return {"diterima": False, "alasan": "peserta sudah finish"}
+            previous = p.get("last_decoder_ts")
+            if previous is not None and decoder_ts <= previous:
+                return {"diterima": False, "alasan": "timestamp duplikat atau terlambat"}
+            if self.cfg.get("target") == "time" and decoder_ts > self.start_decoder_ts + int(self.cfg.get("value", 180))*1000:
+                return {"diterima": False, "alasan": "melewati batas waktu decoder"}
+            first = previous is None
+            baseline = self.start_decoder_ts if first else previous
+            lap_ms = decoder_ts - baseline
+            if not first and lap_ms < int(self.cfg.get("min_lap_ms", 1500)):
+                return {"diterima": False, "alasan": "lintasan ganda / di bawah minimum lap"}
+            if first and self.cfg.get("start_mode") != "staggered" and lap_ms <= 0:
+                return {"diterima": False, "alasan": "waktu lap nol"}
+            if first:
+                p["first_decoder_ts"] = decoder_ts
+            p["last_decoder_ts"] = decoder_ts
+            p["dur_us"] = dur_us
+            is_origin = first and self.cfg.get("start_mode") == "staggered"
+            if not is_origin and lap_ms <= 0:
+                return {"diterima": False, "alasan": "waktu lap nol"}
+            if not is_origin:
+                p["laps"].append(lap_ms)
+            speed = kmh((self.race_track or {}).get("loop_width_m"), dur_us)
+            raw = {"decoder_timecode": decoder_ts, "rssi": rssi,
+                   "hit_count": hit_count, "pass_duration_us": dur_us,
+                   "speed_kmh": speed, "lap_ms": None if is_origin else lap_ms,
+                   "origin": is_origin}
+            p.setdefault("passings", []).append(raw)
+            entry.update(lap=len(p["laps"]), skip=False, kmh=speed,
+                         origin=is_origin)
+            if self.cfg.get("target") == "laps" and len(p["laps"]) >= int(self.cfg.get("value", 10)):
+                p["finish_decoder_ts"] = decoder_ts
+            done = self._cek_selesai()
+            return {"diterima": True, "lap": len(p["laps"]), "lap_ms": raw["lap_ms"],
+                    "entri": entry, "selesai": done}
 
     def _cek_selesai(self) -> bool:
         """Target lap tercapai hanya dihitung dari peserta yang punya transponder.
@@ -263,12 +303,13 @@ class RaceEngine:
         """Dipanggil berkala oleh API: hentikan sesi bila waktu habis."""
         with self.lock:
             if self.status == "live" and self.cfg.get("target") == "time":
-                if self.elapsed_ms() >= int(self.cfg.get("value", 180)) * 1000:
+                if self.elapsed_ms() >= int(self.cfg.get("value", 180)) * 1000 + 2000:
                     self._selesai("waktu habis")
                     return True
             return False
 
     def _selesai(self, alasan: str) -> None:
+        self.end_decoder_ts = self.decoder_ts
         self.status = "done"
         self.akhir_wall = time.time()
         self.alasan_selesai = alasan
@@ -296,27 +337,15 @@ class RaceEngine:
                 sum(p["laps"]) if p["laps"] else float("inf")]
 
     def klasemen(self) -> list[dict]:
+        from .race_results import result_rows
         with self.lock:
-            def kunci(p):
-                return (self._skor(p), p["no"])
-            urut = sorted(self.peserta, key=lambda p: (self._skor(p), p["no"]))
-            t = self.store.track(self.track_id) or {}
-            keliling = t.get("width_m")
-            out = []
-            for i, p in enumerate(urut, 1):
-                best = min(p["laps"]) if p["laps"] else None
-                rata = round(statistics.mean(p["laps"])) if p["laps"] else None
-                sig = (round(statistics.pstdev(p["laps"]))
-                       if len(p["laps"]) > 1 else None)
-                out.append({
-                    "pos": i, "uid": p["uid"], "no": p["no"], "name": p["name"],
-                    "nick": p["nick"], "kelas": p["kelas"], "luar": p["luar"],
-                    "transponder": p["transponder"], "laps": list(p["laps"]),
-                    "n_lap": len(p["laps"]), "best_ms": best, "rata_ms": rata,
-                    "sigma_ms": sig, "dur_us": p["dur_us"],
-                    "kmh": kmh(keliling, best), "terakhir_ms": p["laps"][-1] if p["laps"] else None,
-                })
-            return out
+            drivers = []
+            for p in self.peserta:
+                d = dict(p)
+                d["laps"] = list(p["laps"])
+                d["passings"] = list(p.get("passings", []))
+                drivers.append(d)
+            return result_rows(drivers, self.cfg)
 
     # -- simpan ----------------------------------------------------------
     def simpan(self, nama: Optional[str] = None) -> dict:
@@ -325,9 +354,8 @@ class RaceEngine:
                 raise ValueError("Belum ada sesi untuk disimpan")
             if self.status == "live":
                 self._selesai("disimpan")
-            t = self.store.track(self.track_id) or {}
+            t = self.race_track or self.store.track(self.track_id) or {}
             kal = self.klasemen()
-            # UUID tidak bentrok antar-perangkat saat hasil diunggah ulang.
             rid = str(uuid.uuid4())
             jumlah = sum(d["n_lap"] for d in kal)
             total = self.store.races()
@@ -339,15 +367,16 @@ class RaceEngine:
                 "cfg": dict(self.cfg), "started_at": self.mulai_wall or time.time(),
                 "ended_at": self.akhir_wall or time.time(),
                 "status": "saved", "sync": "belum",
-                "drivers": [{
-                    "pos": d["pos"], "uid": d["uid"], "name": d["name"], "nick": d["nick"],
-                    "kelas": d["kelas"], "transponder": d["transponder"],
-                    "luar": d["luar"], "best_ms": d["best_ms"], "dur_us": d["dur_us"],
-                    "kmh": d["kmh"], "laps": d["laps"],
-                } for d in kal],
+                "start_decoder_ts": self.start_decoder_ts,
+                "end_decoder_ts": self.end_decoder_ts,
+                "loop_width_m": t.get("loop_width_m"),
+                "finish_reason": self.alasan_selesai,
+                "drivers": [dict(d, result_status=("DNS" if not d["n_lap"] else
+                    "DNF" if self.cfg.get("target") == "laps" and d["n_lap"] < int(self.cfg.get("value", 10)) else "FIN")) for d in kal],
             }
             self.store.simpan_race(race)
-            juara = next((d for d in kal if d["best_ms"]), None)
+            juara = min((d for d in kal if d["best_ms"] is not None),
+                        key=lambda d: d["best_ms"], default=None)
             if juara:
                 self.store.perbarui_rekor(self.track_id, juara["best_ms"],
                                           juara["nick"] or juara["name"])
@@ -365,6 +394,10 @@ class RaceEngine:
                 p["laps"] = []
                 p["dur_us"] = None
                 p["terakhir_mono"] = 0.0
+                p["last_decoder_ts"] = None
+                p["first_decoder_ts"] = None
+                p["passings"] = []
+                p["finish_decoder_ts"] = None
 
     # -- snapshot untuk UI ----------------------------------------------
     def snapshot(self) -> dict:
@@ -386,4 +419,6 @@ class RaceEngine:
                 "sisa_ms": self.sisa_ms(),
                 "pilihan": self.pilihan,
                 "alasan_selesai": self.alasan_selesai,
+                "start_decoder_ts": self.start_decoder_ts,
+                "clock_stale": time.monotonic() - self.decoder_received_mono > 3,
             }

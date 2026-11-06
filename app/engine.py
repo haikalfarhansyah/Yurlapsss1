@@ -429,7 +429,11 @@ class Engine:
         if len(parts) > 1:
             try:
                 st["timecode"] = int(parts[1])
-                self._decoder_ts_hint = int(parts[1])
+                if self._decoder_ts_hint is not None and st["timecode"] < self._decoder_ts_hint:
+                    for driver in list(self.drivers.values()):
+                        self.close_stint(driver.transponder_id, "jam decoder direset")
+                    self._emit("clock_reset")
+                self._decoder_ts_hint = st["timecode"]
             except ValueError:
                 pass
         self.noise_history.append(
@@ -458,8 +462,9 @@ class Engine:
         d.transponder_type = p.transponder_type or d.transponder_type
         self.pass_counters["P"] += 1
         self.last_passing_at = now_wall
-        if p.decoder_timecode is None:
-            p.decoder_timecode = self._decoder_ts_hint
+        if p.decoder_timecode is None or p.decoder_timecode < 0:
+            self.log_pass(p, d, "bad", note="timestamp decoder tidak sah")
+            return None
 
         stint = d.current
         lap: Optional[Lap] = None
@@ -476,6 +481,10 @@ class Engine:
             self.version += 1
             return None
 
+        if d.last_pass_ts is None:
+            d.last_pass_ts = p.decoder_timecode
+            self.log_pass(p, d, "start", note="acuan timestamp decoder")
+            return None
         delta_ms = self.lap_delta_ms(d, p, now_mono, now_wall)
 
         if delta_ms < int(self.cfg.min_lap_seconds * 1000):
@@ -534,27 +543,10 @@ class Engine:
 
     def lap_delta_ms(self, d: "Driver", p: Passing, now_mono: float,
                      now_wall: float) -> int:
-        """Selisih waktu lintasan, diambil dari timestamp decoder OpenStint.
-
-        Protokol OpenStint: ``P <timestamp> ...`` = milidetik dari jam monotonik
-        decoder (sejak openstint.exe dijalankan). Selisih dua timestamp itulah
-        lap time yang paling akurat, jadi itulah yang dipakai.
-
-        Cadangan: kalau timestamp tidak ada (decoder lain / data lama) atau
-        decoder baru saja restart (timestamp mundur), pakai jam komputer.
-        """
-        ts = p.decoder_timecode
-        prev = d.last_pass_ts
-        wall_ms = int(round((now_mono - d.last_pass_mono) * 1000)) \
-            if d.last_pass_mono is not None else 0
-        if ts is not None and prev is not None:
-            delta = int(ts) - int(prev)
-            if delta > 0:
-                return delta
-            # timestamp mundur -> decoder restart di tengah stint
-            self.log("warn", "Timestamp decoder mundur (openstint dijalankan ulang) "
-                             "- lap dihitung dari jam komputer")
-        return wall_ms
+        """Hanya selisih timestamp decoder; tidak pernah jam kedatangan PC."""
+        if p.decoder_timecode is None or d.last_pass_ts is None:
+            return 0
+        return p.decoder_timecode - d.last_pass_ts
 
     def log_pass(self, p: Passing, driver: "Driver", kind: str,
                  lap_ms: Optional[int] = None, seq: Optional[int] = None,

@@ -1,7 +1,7 @@
 /* ============================================================================
    YurLaps — Quick Race (aplikasi nyata, sepenuhnya offline)
-   Data club disimpan di SQLite lewat API lokal /api/*. Tidak ada localStorage
-   untuk data club, tidak ada permintaan ke internet.
+   Data timing disimpan di SQLite. Layanan Python menyinkronkan cache club
+   dan hasil race di latar belakang saat akun leader terhubung.
    ========================================================================== */
 (function(){
 'use strict';
@@ -16,7 +16,8 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
 /* ---------- format ---------- */
 function fmtLap(ms){
   if(ms == null || !isFinite(ms)) return '—';
-  const m = Math.floor(ms / 60000), s = Math.floor(ms / 1000) % 60, r = Math.round(ms % 1000);
+  ms=Math.round(ms);
+  const m = Math.floor(ms / 60000), s = Math.floor(ms / 1000) % 60, r = ms % 1000;
   return m ? `${m}:${pad(s)}.${String(r).padStart(3,'0')}` : `${s}.${String(r).padStart(3,'0')}`;
 }
 function fmtClock(ms){
@@ -26,16 +27,16 @@ function fmtClock(ms){
 }
 function fmtTgl(ts){
   if(!ts) return '—';
-  const d = new Date(ts * 1000 > 1e11 ? ts : ts * 1000);
+  const d = new Date(ts > 1e11 ? ts : ts * 1000);
   return pad(d.getDate()) + ' ' + ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][d.getMonth()]
     + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
-/* km/h = lebar loop (m) ÷ waktu lap (s) × 3,6. Contoh 42 m / 9,412 s = 16 km/h.
-   pass_duration (0,1 s) BUKAN waktu satu loop — jangan dipakai di sini. */
-function kmh(kelilingM, lapMs){
-  if(!kelilingM || !lapMs) return null;
-  return Math.round((kelilingM / (lapMs/1000)) * 3.6);
+/* Kecepatan passing: jarak antarkabel (m) / duration (µs). */
+function kmh(widthM, passingUs){
+  if(!(widthM > 0) || !(passingUs > 0)) return null;
+  return Math.round(widthM * 3600000 / passingUs * 100) / 100;
 }
+
 function rata(a){ return a.length ? a.reduce((x,y) => x+y, 0) / a.length : null; }
 function sigma(a){
   if(a.length < 2) return null;
@@ -81,6 +82,7 @@ async function api(path, body){
 /* ============================================================================
    STATE LOKAL UI
    ========================================================================== */
+let CLOUD = {};
 const DATA = { club:null, ringkasan:{}, track:[], member:[], preset:[] };
 const state = { trackId:null, presetId:null, peserta:[] };
 let sesi = null;        // snapshot dari server
@@ -112,6 +114,7 @@ function sedangJalan(){
    ========================================================================== */
 async function muatAwal(){
   const b = await api('/api/club/bootstrap');
+  CLOUD = b.cloud || CLOUD;
   DATA.club = b.club || {};
   DATA.ringkasan = b.ringkasan || {};
   DATA.track = b.tracks || [];
@@ -172,7 +175,7 @@ function renderTrackSelect(){
   const nSesi = t.n_race || 0;
   $('trackMeta').innerHTML =
     `<b>${nSesi} sesi di track ini</b><span>Rekor: ${fmtLap(t.best_ms)} · ${esc(t.holder || '—')}`
-    + (t.width_m ? ` · lebar loop ${t.width_m} m` : ' · lebar loop belum diisi') + `</span>`;
+    + (t.loop_width_m ? ` · lebar loop ${t.loop_width_m} m` : ' · lebar loop belum diisi') + `</span>`;
   $('trackSrc').textContent = t.synced ? 'dari website' : 'lokal · belum sinkron';
 }
 function renderPresetSelect(){
@@ -195,10 +198,8 @@ function renderChips(){
   ];
   let html = chips.map(([k,v]) => `<span class="chip">${k}: <b>${esc(v)}</b></span>`).join('');
   const t = trackAktif();
-  if(t && !t.width_m) html += `<span class="chip warn">Lebar loop belum diisi — km/h tidak dihitung</span>`;
+  if(t && !t.loop_width_m) html += `<span class="chip warn">Lebar loop belum diisi — km/h tidak dihitung</span>`;
   if(!state.peserta.length) html += `<span class="chip warn">Belum ada peserta</span>`;
-  const pending = DATA.ringkasan && DATA.ringkasan.belum_terkirim || 0;
-  if(pending) html += `<span class="chip warn">${pending} race belum diunggah</span>`;
   $('chips').innerHTML = html;
   $('qrTitle').textContent = (c.nama || 'Quick Race') + (t ? ' · ' + t.name : '');
 }
@@ -220,24 +221,8 @@ function renderBoard(){
     .map(p => p.best_ms).concat([Infinity]));
   const live = sesi.status === 'live';
 
-  body.innerHTML = baris.map((p, i) => {
-    const v = p.kmh;
-    const st = live
-      ? (p.best_ms != null && p.best_ms === terbaik ? '<span class="st-live">tercepat</span>'
-         : '<span class="st-run">jalan</span>')
-      : (p.n_lap ? '<span class="st-run">selesai</span>' : '<span class="st-out">belum lintas</span>');
-    const luar = p.luar ? '<span class="outside">bukan member</span>' : '';
-    return `<tr class="row ${sesi.pilihan === p.uid ? 'sel' : ''}" data-uid="${p.uid}">
-      <td class="pos ${i === 0 ? 'first' : ''}">${i+1}</td>
-      <td class="nm">${esc(p.nick || p.name)}${luar}<small>${esc(p.name)}${p.transponder == null ? ' · transponder belum ada' : ' · TP ' + p.transponder}</small></td>
-      <td class="num r">${p.n_lap}</td>
-      <td class="num r">${fmtLap(p.terakhir_ms)}</td>
-      <td class="best r">${fmtLap(p.best_ms)}</td>
-      <td class="num r">${fmtLap(p.rata_ms)}</td>
-      <td class="sig r">${p.sigma_ms == null ? '—' : (p.sigma_ms/1000).toFixed(3)}</td>
-      <td class="spd r">${v == null ? '—' : '<b>' + v + '</b>'}</td>
-      <td class="r">${st}</td></tr>`;
-  }).join('');
+  body.innerHTML = baris.map((p,i) => `<tr class="row ${sesi.pilihan===p.uid?'sel':''}" data-uid="${esc(p.uid)}">
+    ${resultCells(p, i)}</tr>`).join('');
 
   body.querySelectorAll('tr.row').forEach(tr => {
     tr.onclick = () => { if(sesi) sesi.pilihan = tr.dataset.uid; renderBoard(); renderDetail(); };
@@ -257,6 +242,8 @@ function renderDetail(){
     ? `${p.name} · transponder belum dipetakan`
     : `${p.name} · TP ${p.transponder}`;
   $('dLaps').textContent = p.n_lap;
+  $('dTopSpeed').textContent = speed(p.top_speed_kmh);
+  $('dAverageSpeed').textContent = speed(p.average_speed_kmh);
   $('dBest').textContent = fmtLap(p.best_ms);
   $('dAvg').textContent = fmtLap(p.rata_ms);
   $('dSig').textContent = p.sigma_ms == null ? '—' : (p.sigma_ms/1000).toFixed(3);
@@ -269,8 +256,7 @@ function renderDetail(){
   }).join('') || '<div class="note" style="font-size:11px">Belum ada lap.</div>';
   // grafik sederhana: batang per lap
   const maks = Math.max(...lap, 1);
-  $('dGraph').innerHTML = lap.map(ms =>
-    `<i style="height:${Math.max(8, Math.round((ms/maks)*100))}%"></i>`).join('');
+  $('dGraph').setAttribute('points',lap.map((ms,i)=>`${lap.length<2?120:i*240/(lap.length-1)},${44-ms/maks*40}`).join(' '));
 }
 
 function renderLog(){
@@ -330,12 +316,14 @@ async function mulaiCountdown(){
     $('cdCap').textContent = sisa === n ? 'Bersiap' : 'Menuju garis start';
     bunyi(660, .18);
     if(sisa === 0){
-      $('cdNum').textContent = 'GO';
+      clearInterval(cdTimer);
+      mulaiLive().then(ok=>{if(ok){$('cdNum').textContent='GO';bunyi(1180,.4);}else{$('cdNum').textContent='!';}});
+      $('cdNum').textContent = '…';
       $('cdNum').className = 'n go';
       $('cdCap').textContent = 'Balapan dimulai';
-      bunyi(1180, .4);
+
       clearInterval(cdTimer);
-      setTimeout(() => { layer.hidden = true; document.body.classList.remove('busy'); mulaiLive(); }, 700);
+      setTimeout(() => { layer.hidden = true; document.body.classList.remove('busy'); }, 700);
       return;
     }
     sisa--;
@@ -349,13 +337,14 @@ async function mulaiLive(){
   try{
     await api('/api/race/go');
     sesi = await segarkanSesi();
-  }catch(e){ return gagal(e); }
+  }catch(e){gagal(e); await api('/api/race/reset'); sesi=await segarkanSesi();renderAll();return false;}
   $('liveTag').className = 'live';
   $('liveTag').innerHTML = '<i></i>LIVE';
   $('asideDec').textContent = 'aktif · sesi berjalan';
   renderAll();
   mulaiTick();
   toast('Quick Race dimulai');
+  return true;
 }
 
 let tickTimer = null;
@@ -371,42 +360,12 @@ function mulaiTick(){
     // log ikut disegarkan: lintasan bisa datang dari decoder, bukan hanya
     // dari tombol di layar ini (mis. saat diuji lewat API)
     renderBoard(); renderDetail(); renderLog();
+    if(sesi.clock_stale) $('asideDec').textContent='Data decoder terputus · timer ditahan';
     if(sesi.status === 'done'){ clearInterval(tickTimer); selesaiTampil(); }
   }, 500);
 }
 
-async function catatLintasan(){
-  if(!sesi || sesi.status !== 'live'){ toast('Mulai sesi dulu'); return; }
-  const peserta = (sesi.peserta || []).filter(p => p.transponder != null);
-  if(!peserta.length){ toast('Peserta belum punya transponder'); return; }
-  const hidup = peserta.filter(p => !p.tunggu);
-  const p = (hidup.length ? hidup : peserta)[Math.floor(Math.random() * (hidup.length || peserta.length))];
-  try{
-    const r = await api('/api/race/pass', {
-      transponder: p.transponder,
-      rssi: -45 - Math.random() * 20,
-      dur_us: 90000 + Math.round(Math.random() * 50000),
-      simulasi: 1   // tombol uji: server membuat waktu lap yang wajar
-    });
-    sesi = r.race;
-    renderAll();
-    if(r.hasil && r.hasil.diterima){
-      toast('Lintasan dicatat: ' + (p.nick || p.name) + ' · L' + r.hasil.lap);
-    }
-    if(sesi.status === 'done'){ selesaiTampil(); }
-  }catch(e){ gagal(e); }
-}
-
 let simTimer = null;
-function jadwalkanSim(){
-  clearTimeout(simTimer);
-  const putar = () => {
-    if(!sesi || sesi.status !== 'live') return;
-    catatLintasan();
-    simTimer = setTimeout(putar, 900 + Math.random() * 1400);
-  };
-  simTimer = setTimeout(putar, 1200);
-}
 
 async function selesai(alasan){
   if(!sesi || sesi.status !== 'live') return;
@@ -453,7 +412,7 @@ function renderTombol(){
   // peserta dikunci juga sampai sesi disimpan/dibuang -- server akan menolak
   // kalau dipaksa, jadi tombolnya dinonaktifkan daripada gagal diam-diam.
   $('btnPeserta').disabled = jalan || st === 'done';
-  $('btnSimPass').disabled = st !== 'live';
+
   $('selTrack').disabled = jalan;
   $('qrLead').textContent = st === 'live'
     ? 'Sesi berjalan — lap tercatat lewat decoder.'
@@ -720,7 +679,7 @@ function renderTrackPage(){
       <span class="who"><b>${esc(t.name)} ${t.synced
         ? '<span class="badge-sync ya">tersinkron</span>'
         : '<span class="badge-sync belum">belum sinkron</span>'}</b>
-        <span>${esc(t.addr || '—')}${t.width_m ? ' · lebar loop ' + t.width_m + ' m' : ' · lebar loop belum diisi'}</span></span>
+        <span>${esc(t.addr || '—')}${t.loop_width_m ? ' · lebar loop ' + t.loop_width_m + ' m' : ' · lebar loop belum diisi'}</span></span>
       <span class="rec"><b>${fmtLap(t.best_ms)}</b>${esc(t.holder || '—')}</span>
       <span class="act">
         <button class="btn sm" data-act="edit">Edit</button>
@@ -760,7 +719,7 @@ function bukaTrack(id){
   $('trkTitle').textContent = t ? 'Edit track' : 'Tambah track';
   $('trkName').value = t ? t.name : '';
   $('trkAddr').value = t ? (t.addr || '') : '';
-  $('trkWidth').value = t ? (t.width_m || '') : '';
+  $('trkWidth').value = t ? (t.loop_width_m || '') : '';
   $('trkNote').value = t ? (t.note || '') : '';
   hitungTrack();
   $('modalTrack').hidden = false;
@@ -768,8 +727,7 @@ function bukaTrack(id){
 function hitungTrack(){
   const w = Number($('trkWidth').value);
   $('trkHitung').innerHTML = w
-    ? `Lebar loop <b>${w} m</b> — contoh kecepatan rata-rata satu lap: `
-      + `lap 9.4 s → <b>${kmh(w,9400)} km/h</b>; lap 12.1 s → <b>${kmh(w,12100)} km/h</b>`
+    ? `Jarak antarkabel <b>${w} m</b> · passing 90.000 µs → <b>${kmh(w,90000)} km/h</b>`
     : 'Isi lebar loop untuk melihat contoh kecepatan.';
 }
 $('trkWidth').oninput = hitungTrack;
@@ -778,7 +736,7 @@ $('trkSave').onclick = async () => {
   const name = $('trkName').value.trim();
   if(!name){ toast('Nama track belum diisi'); $('trkName').focus(); return; }
   const body = { name, addr: $('trkAddr').value.trim(),
-    width_m: Number($('trkWidth').value) || 0, note: $('trkNote').value.trim() };
+    loop_width_m: $('trkWidth').value || null, note: $('trkNote').value.trim() };
   if(editTrackId) body.id = editTrackId;
   try{
     const r = await api('/api/track', body);
@@ -799,6 +757,7 @@ $('btnTrackAdd').onclick = () => bukaTrack(null);
 $('btnTrackSync').onclick = async () => {
   try{
     await api('/api/tracks/sync', {});
+    toast('Sinkronisasi dijadwalkan; data tetap tersimpan lokal');
   }catch(e){
     // 409 = belum ada koneksi; tetap beri tahu apa yang terjadi
     toast(e.message);
@@ -820,7 +779,7 @@ function renderMember(){
         ? m.transponder.map(t => `<span class="tp">${t}</span>`).join('')
         : '<span style="font-size:10px">transponder belum dipetakan</span>'}<br>${
         esc([m.mobil, m.kelas].filter(Boolean).join(' · ') || 'mobil & kelas belum diisi')}</span>
-      <span class="role ${m.role}">${esc((m.role || 'member').replace('_','-'))}</span>
+      <span class="role ${esc(m.role)}">${m.source==='website'?'website':'lokal'}</span><button class="btn sm" data-edit-member="${esc(m.id)}">Edit</button>
       <span class="st-p ${m.status}">${m.status === 'active' ? 'aktif' : 'menunggu'}</span>
     </div>`).join('') || '<div class="empty">Tidak ada member yang cocok.</div>';
   $('memberCount').textContent = list.length + ' tampil';
@@ -831,67 +790,45 @@ function renderMember(){
 }
 $('memberSearch').oninput = renderMember;
 
-const decLog = [];
-function catatDecoder(e, v){
-  decLog.unshift({ tp:e.transponder, nama:e.nama, rssi:e.rssi, durUs:e.dur_us,
-    kmh:v, jam:e.jam, t:Date.now() });
-  del(decLog, 40);
-  renderDecoderLog();
-}
-function del(a, n){ if(a.length > n) a.length = n; }
-function renderDecoderLog(){
-  const body = $('decLogBody');
-  $('decLogN').textContent = decLog.length + ' terakhir';
-  body.innerHTML = decLog.slice(0, 20).map(e => `
-    <tr><td class="mono">${e.tp}</td><td class="nm">${esc(e.nama)}</td>
-      <td class="num r">${e.rssi == null ? '—' : Number(e.rssi).toFixed(1)}</td>
-      <td class="num r">${e.durUs == null ? '—' : (e.durUs/1e6).toFixed(3) + ' s'}</td>
-      <td class="spd r">${e.kmh == null ? '—' : '<b>'+e.kmh+'</b>'}</td>
-      <td class="num r">${esc(e.jam)}</td></tr>`).join('')
-    || '<tr><td colspan="6"><div class="note">Belum ada lintasan.</div></td></tr>';
-  const perMenit = decLog.length
-    ? Math.round(decLog.length / Math.max(1, (Date.now() - decLog[0].t)/60000)) : 0;
-  $('decRate').textContent = perMenit;
-}
-/* ---------------------------------------------------------------- Decoder
-   Nilai di halaman ini dibaca dari keadaan mesin sungguhan (/api/state),
-   bukan tulisan tetap. Kalau decoder belum terpasang, UI mengatakannya. */
 let decOnline = false;
-
+let decoderBusy = false;
 async function segarkanDecoder(){
-  let st = null;
+  if(decoderBusy) return;
+  decoderBusy = true;
   try{
-    const r = await fetch(BASE + '/api/state');
-    if(r.ok) st = await r.json();
-  }catch(e){ return; }
-  if(!st) return;
-  const d = st.decoder || {};
-  decOnline = !!d.online;
-  $('decEndpoint').textContent = d.endpoint || '—';
-  const g = d.gain == null ? 20 : Number(d.gain);
-  $('decGain').textContent = g.toFixed(2);
-  gainTersimpan = g;
-  if(document.activeElement !== $('gainRange')){
-    $('gainRange').value = g;
-    $('gainVal').textContent = g.toFixed(1) + ' dB';
-    $('gainStatus').textContent = 'tersimpan';
-  }
-  $('decDev').textContent = d.name || 'YurLaps Decoder';
-  const led = $('decLed');
-  if(decOnline){
-    led.innerHTML = '<i></i>aktif';
-    led.style.color = '';
-    led.parentElement && (led.parentElement.style.fontSize = '13px');
-  } else {
-    led.innerHTML = '<i style="background:#a9b5c3;box-shadow:none"></i>menunggu decoder';
-    led.style.color = 'var(--muted)';
-  }
-  if(!decLog.length) $('decRate').textContent = '0';
-  if(!sesi || sesi.status !== 'live'){
-    $('asideDec').textContent = decOnline
-      ? 'aktif · menunggu lintasan' : 'menunggu decoder';
-  }
+    const st = await api('/api/state');
+    const d = st.decoder || {}, status = d.status || {}, manager = d.manager || {};
+    decOnline = !!d.online;
+    $('decEndpoint').textContent = d.endpoint || '—';
+    $('decDev').textContent = d.name || 'OpenStint';
+    $('decLed').textContent = decOnline ? '● Data diterima' : manager.running ? '● Proses aktif · belum ada data' : '○ Tidak terhubung';
+    $('decLed').style.color = decOnline ? '#168657' : '#9b6a19';
+    $('decRate').textContent = (d.counters || {}).P || 0;
+    $('decNoise').textContent = decOnline && Number.isFinite(status.noise_power) ? status.noise_power.toFixed(1) : '—';
+    $('decDiagnostic').textContent = decOnline
+      ? `Data OpenStint masuk · ${d.counters.P || 0} passing · ${d.counters.S || 0} status. Timestamp ${status.timecode ?? '—'} ms.`
+      : manager.running ? 'OpenStint berjalan, tetapi belum ada data ZeroMQ. Periksa endpoint, perangkat SDR, dan log proses.'
+      : (manager.last_error || 'Menunggu decoder. Sambungkan SDR dan jalankan OpenStint.');
+    const g = Number(d.gain ?? 20);
+    $('decGain').textContent = g.toFixed(1) + ' dB';
+    gainTersimpan = g;
+    if(document.activeElement !== $('gainRange') && !gainSibuk){$('gainRange').value=g;$('gainVal').textContent=g.toFixed(1)+' dB';}
+    $('gainRange').disabled = sedangJalan(); $('btnDecStart').disabled = sedangJalan();
+    const passes = (d.passes || []).slice().reverse();
+    $('decLogN').textContent = passes.length + ' terakhir';
+    $('decLogBody').innerHTML = passes.map(p=>`<tr><td class="mono">${esc(p.transponder_id)}</td><td class="nm">${esc(p.driver || 'Belum terdaftar')}</td>
+      <td class="num r">${p.rssi == null ? '—' : Number(p.rssi).toFixed(1)}</td>
+      <td class="num r">${p.hit_count ?? '—'}</td><td class="num r">${p.pass_duration_us ?? '—'}</td>
+      <td class="num r">${p.decoder_timecode ?? '—'}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Belum ada passing. Transponder yang belum terdaftar juga akan muncul di sini.</td></tr>';
+    const values = (d.noise_history || []).map(x=>x.noise).filter(Number.isFinite);
+    if(values.length){const low=Math.min(...values)-2, high=Math.max(...values)+2;
+      $('noiseChart').innerHTML=`<text x="8" y="18" fill="#64748b" font-size="11">${high.toFixed(1)} dBFS</text><text x="8" y="102" fill="#64748b" font-size="11">${low.toFixed(1)} dBFS</text><polyline fill="none" stroke="#278bc7" stroke-width="2" points="${values.map((v,i)=>`${80+i*800/Math.max(1,values.length-1)},${100-(v-low)/(high-low)*90}`).join(' ')}"/>`;
+    }else $('noiseChart').innerHTML='<text x="20" y="60" fill="#64748b">Belum ada status noise dari decoder</text>';
+  }catch(e){$('decDiagnostic').textContent=e.message;}finally{decoderBusy=false;}
 }
+function renderDecoderLog(){segarkanDecoder();}
+function catatDecoder(){segarkanDecoder();}
+setInterval(segarkanDecoder, 1000);
 
 /* Gain: geser = angka di layar; lepas = konfirmasi lalu simpan.
    Tanpa jeda/debounce: satu gerakan = satu konfirmasi (sebelumnya konfirmasi
@@ -948,14 +885,6 @@ $('gainRange').onchange = async e => {
   setTimeout(segarkanDecoder, 1200);
 };
 
-$('btnDecStop').onclick = () => {
-  // Hentikan pengelolaan decoder oleh YurLaps (perangkat sungguhan).
-  api('/api/decoder/restart', {}).catch(() => {});
-  toast(decOnline
-    ? 'YurLaps berhenti mengelola decoder. Nyalakan lagi dengan “Mulai ulang”.'
-    : 'Belum ada decoder terpasang untuk dihentikan.');
-};
-
 $('btnDecStart').onclick = async () => {
   try{
     await api('/api/decoder/restart', {});
@@ -988,8 +917,7 @@ async function renderHistory(){
     const badge = r2.sync === 'terkirim'
       ? '<span class="st-live">terkirim</span>'
       : '<span class="st-out">belum</span>';
-    const durasi = (r2.ended_at && r2.started_at)
-      ? Math.max(0, Math.round((r2.ended_at - r2.started_at) * 1000)) : 0;
+    const durasi = r2.elapsed_ms || 0;
     return `<tr class="row" data-id="${r2.id}">
       <td class="nm">${esc(r2.name)}<small>${fmtTgl(r2.started_at)}</small></td>
       <td>${esc(r2.track_name || '—')}</td>
@@ -1028,6 +956,7 @@ function renderHistRekap(list){
 async function unggah(id){
   try{
     await api('/api/race/upload', { id });
+    toast('Race masuk antrean unggah otomatis');
   }catch(e){ toast(e.message); }
 }
 
@@ -1038,23 +967,21 @@ async function bukaSesi(id){
     r = res.race;
   }catch(e){ return gagal(e); }
   $('sesiTitle').textContent = r.name;
-  const durasi = (r.ended_at && r.started_at)
-    ? Math.max(0, Math.round((r.ended_at - r.started_at) * 1000)) : 0;
+  const durasi = r.end_decoder_ts != null && r.start_decoder_ts != null ? Math.max(0,r.end_decoder_ts-r.start_decoder_ts) : 0;
   $('sesiSub').textContent = `${r.track_name || '—'} · ${fmtTgl(r.started_at)} · durasi ${fmtClock(durasi)}`
     + ` · ${r.drivers.length} pembalap · ${r.drivers.reduce((s,d) => s + d.laps.length, 0)} lap`
     + ` · ${r.sync === 'terkirim' ? 'terkirim' : 'belum diunggah'}`;
-  $('sesiBody').innerHTML = `<table><thead><tr><th>#</th><th>Pembalap</th>
-      <th class="r">Lap</th><th class="r">Best</th><th class="r">km/h</th>
-      <th class="r">Transponder</th><th>Semua lap</th></tr></thead><tbody>`
-    + r.drivers.map(d => `<tr>
-        <td class="pos">${d.pos}</td>
-        <td class="nm">${esc(d.nick || d.name)}<small>${esc(d.name)}</small></td>
-        <td class="num r">${d.laps.length}</td>
-        <td class="best r">${fmtLap(d.best_ms)}</td>
-        <td class="spd r">${d.kmh == null ? '—' : '<b>'+d.kmh+'</b>'}</td>
-        <td class="mono r">${d.transponder == null ? '—' : d.transponder}</td>
-        <td class="mono" style="font-size:11px">${d.laps.map(fmtLap).join(' · ') || '—'}</td>
-      </tr>`).join('') + '</tbody></table>';
+  reportRaceId = id;
+  const ds=r.drivers, count=Math.max(0,...ds.map(d=>d.laps.length));
+  $('sesiBody').innerHTML = `<p class="note">Acuan GO decoder: ${r.start_decoder_ts ?? 'tidak tersedia (arsip lama)'} ms · ${esc(r.finish_reason || '')}. Data lokal.</p>
+    <h3>Results</h3><div class="report-table"><table><thead><tr><th>Pos</th><th>Chg</th><th>Driver</th><th>Gap ∑</th><th>Gap Δ</th><th>Laps</th><th>Total</th><th>Best lap</th><th>Top3 avg</th><th>Top3 consecutive</th><th>P80 avg</th><th>Consistency</th></tr></thead><tbody>`
+    + ds.map((d,i)=>`<tr>${resultCells(d,i)}</tr>`).join('')+'</tbody></table></div>'
+    + '<h3 style="margin-top:24px">Lap times</h3><div class="report-table"><table><thead><tr><th>Lap</th>'
+    + ds.map(d=>`<th>${esc(d.nick||d.name)}</th>`).join('')+'</tr></thead><tbody>'
+    + Array.from({length:count},(_,i)=>`<tr><td>${i+1}</td>${ds.map(d=>`<td class="num" style="color:${d.laps[i]===d.best_ms?'#c43e2e':'inherit'}">${fmtLap(d.laps[i])}</td>`).join('')}</tr>`).join('')+'</tbody></table></div>'
+    + reportCharts(ds,r.cfg||{})
+    + '<p class="note">P80 avg: rata-rata 80% lap tercepat (dibulatkan ke atas). Consistency: 100 × (1 − σ/rata-rata). Segmen start grid masuk total tetapi tidak masuk statistik pace.</p>'
+    + '<h3>Detail pembalap</h3>'+ds.map(d=>`<details class="side-card"><summary>${esc(d.nick||d.name)}</summary><p>Top speed: ${speed(d.top_speed_kmh)} · Average speed: ${speed(d.average_speed_kmh)}</p><p class="note">Dari passing duration dan jarak antarkabel ${r.loop_width_m ?? '—'} m.</p></details>`).join('');
   $('modalSesi').hidden = false;
 }
 $('sesiClose').onclick = () => { $('modalSesi').hidden = true; };
@@ -1117,7 +1044,7 @@ $('btnReset').onclick = () => resetSesi(false);
 $('btnStart').onclick = mulaiCountdown;
 $('btnFinish').onclick = () => selesai('dihentikan operator');
 $('btnClearLog').onclick = () => { toast('Passing log ada di sisi sesi'); };
-$('btnSimPass').onclick = () => catatLintasan();
+
 $('selTrack').onchange = async () => {
   const id = $('selTrack').value;
   if(sedangJalan()){ $('selTrack').value = state.trackId; toast('Track tidak bisa diganti saat sesi berjalan'); return; }
@@ -1145,11 +1072,11 @@ function renderAll(){
   const namaClub = (DATA.club && DATA.club.name) || 'Club';
   $('akunNick').textContent = namaClub;
   $('akunAv').textContent = namaClub.slice(0,2).toUpperCase();
-  $('akunRole').textContent = (DATA.club && DATA.club.role ? DATA.club.role : '—')
+  $('akunRole').textContent = (DATA.club && DATA.club.role ? DATA.club.role : 'leader')
     + ' · ' + ((DATA.club && DATA.club.name) || '—');
   if(sesi){
     const belum = (DATA.ringkasan && DATA.ringkasan.belum_terkirim) || 0;
-    $('pilltxt').textContent = 'Offline — ' + belum + ' sesi belum diunggah';
+    $('pilltxt').textContent = (CLOUD.syncing ? 'Sinkronisasi' : CLOUD.online ? 'Online' : 'Offline') + ' — ' + belum + ' sesi belum diunggah';
     if(sesi.status === 'live'){
       $('liveTag').className = 'live';
       $('liveTag').innerHTML = '<i></i>LIVE';
@@ -1173,6 +1100,7 @@ function renderHistFilter(){
 
 async function muatUlangData(){
   const b = await api('/api/club/bootstrap');
+  CLOUD = b.cloud || CLOUD;
   DATA.club = b.club || {};
   DATA.ringkasan = b.ringkasan || {};
   DATA.track = b.tracks || [];
@@ -1188,21 +1116,68 @@ async function muatUlangData(){
   pulihkanPeserta();
 }
 
-/* ---------------------------------------------------------------------------
-   Panel akun: hanya menampilkan keadaan lokal (belum ada login di mode offline)
-   ------------------------------------------------------------------------- */
-/* Panel akun: jujur menyebut keadaan sebenarnya. Belum ada login di tahap
-   offline, jadi jangan menampilkan nama orang seolah sudah masuk. */
-$('btnAkun').onclick = () => {
-  const club = DATA.club || {};
-  const rk = DATA.ringkasan || {};
-  alert('Club aktif : ' + (club.name || '—')
-    + '\nPeran      : ' + (club.role || '—')
-    + '\nMode       : offline (data di perangkat ini)'
-    + '\nSesi belum diunggah: ' + (rk.belum_terkirim == null ? '—' : rk.belum_terkirim)
-    + '\n\nLogin akun dan sinkronisasi ke website belum aktif '
-    + 'pada tahap offline ini.');
+/* Account actions never expose Supabase credentials to the local renderer. */
+let cloudPolling = false;
+async function refreshCloud(){
+  if(cloudPolling) return;
+  cloudPolling = true;
+  try{
+    const result = await api('/api/cloud/status');
+    const oldScope = (CLOUD.user_id || '') + (CLOUD.selected_club || '');
+    CLOUD = result.cloud;
+    const scopeChanged = oldScope !== (CLOUD.user_id || '') + (CLOUD.selected_club || '');
+    if(scopeChanged){ state.trackId = null; state.presetId = null; state.peserta = []; }
+    // Refresh data while idle; timing/participants stay stable during a race.
+    if(scopeChanged || !sesi || sesi.status === 'idle'){
+      await muatUlangData(); renderAll();
+    }
+    const pending = DATA.ringkasan.belum_terkirim || 0;
+    $('pilltxt').textContent = (CLOUD.syncing ? 'Sinkronisasi' : CLOUD.online ? 'Online' : 'Offline')
+      + ' — ' + pending + ' sesi belum diunggah';
+    $('cloudAccount').textContent = CLOUD.email || 'Login menggunakan akun website YurLaps.';
+    $('cloudStatus').textContent = CLOUD.error || (CLOUD.login_required ? 'Sesi berakhir. Login lagi; data offline tetap tersedia.'
+      : CLOUD.syncing ? 'Menyinkronkan data…' : CLOUD.last_ok ? 'Sinkronisasi terakhir: ' + new Date(CLOUD.last_ok * 1000).toLocaleString()
+      : 'Data race tersimpan di komputer ini.');
+    $('cloudClub').innerHTML = (CLOUD.clubs || []).map(c => '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>').join('');
+    $('cloudClub').value = CLOUD.selected_club || '';
+    $('cloudClub').disabled = !(CLOUD.clubs || []).length;
+    $('cloudLogout').disabled = !CLOUD.user_id;
+    $('cloudSync').disabled = !CLOUD.user_id;
+    $('cloudConflicts').innerHTML = (result.conflicts || []).map(c => '<div class="note">Konflik ' + esc(c.kind) + ': ' + esc(c.name)
+      + '<p>Data berubah di website dan di perangkat ini.</p><button class="btn sm" data-kind="' + esc(c.kind) + '" data-id="' + esc(c.id)
+      + '" data-choice="remote">Pakai versi website</button> <button class="btn sm" data-kind="' + esc(c.kind) + '" data-id="' + esc(c.id)
+      + '" data-choice="local">Kirim versi lokal</button></div>').join('');
+    $('cloudConflicts').querySelectorAll('button').forEach(button => button.onclick = async () => {
+      try { await api('/api/cloud/resolve', {...button.dataset}); await refreshCloud(); }
+      catch(error){ toast(error.message); }
+    });
+    if(scopeChanged || !CLOUD.syncing) await renderHistory();
+  }catch(error){ console.warn('Status sinkronisasi:', error.message); }
+  finally{ cloudPolling = false; }
+}
+$('btnAkun').onclick = () => { $('modalCloud').hidden = false; refreshCloud(); };
+$('cloudClose').onclick = () => { $('modalCloud').hidden = true; };
+$('cloudLogin').onclick = async () => {
+  try{
+    const result = await api('/api/cloud/login', {});
+    const link = $('cloudLoginLink'); link.href = result.url; link.hidden = false; link.click();
+    $('cloudStatus').textContent = 'Selesaikan login di browser, lalu kembali ke aplikasi.';
+  }catch(error){ toast(error.message); }
 };
+$('cloudLogout').onclick = async () => {
+  try{ await api('/api/cloud/logout', {}); await refreshCloud(); }
+  catch(error){ toast(error.message); }
+};
+$('cloudClub').onchange = async () => {
+  try{ await api('/api/cloud/select', {club_id: $('cloudClub').value}); await refreshCloud(); }
+  catch(error){ toast(error.message); }
+};
+$('cloudSync').onclick = async () => {
+  try{ await api('/api/cloud/sync', {}); toast('Sinkronisasi dijadwalkan'); }
+  catch(error){ toast(error.message); }
+};
+window.addEventListener('online', () => api('/api/cloud/sync', {}).catch(() => {}));
+setInterval(refreshCloud, 5000);
 
 /* ============================================================================
    MULAI
@@ -1210,6 +1185,71 @@ $('btnAkun').onclick = () => {
 window.addEventListener('unhandledrejection', ev => {
   console.error('YurLaps: janji gagal', ev.reason && ev.reason.stack || ev.reason);
 });
+
+function speed(v){return v == null ? '—' : Number(v).toFixed(2)+' km/h';}
+function fmtGap(v){return !v?'—':v.laps!=null?`${v.laps>0?'+':''}${v.laps}L`:`${v.ms>=0?'+':''}${(v.ms/1000).toFixed(3)}`;}
+function resultCells(p,i){return `<td class="pos">${p.pos || i+1}</td><td>${p.change>0?'▲'+p.change:p.change<0?'▼'+Math.abs(p.change):'—'}</td>
+<td class="nm">${esc(p.nick || p.name)} ${p.result_status && p.result_status!=="FIN"?`<span class="outside">${esc(p.result_status)}</span>`:""}<small>#${p.no || i+1} · TP ${p.transponder ?? '—'}</small></td>
+<td class="num">${fmtGap(p.gap_leader)}</td><td class="num">${fmtGap(p.gap_previous)}</td><td class="num">${p.n_lap ?? p.laps.length}</td>
+${['total_ms','best_ms','top3_ms','consecutive_ms','p80_ms'].map(k=>`<td class="num">${fmtLap(p[k])}</td>`).join('')}
+<td class="num">${p.consistency==null?'—':p.consistency.toFixed(1)+'%'}</td>`;}
+const reportColors=['#e65a43','#4988db','#19a56a','#a769dc','#da8e20','#24a9b4','#c8508b','#7a9b2b','#65758d'];
+function reportCharts(drivers,cfg){
+ const legend=drivers.map((d,i)=>`<span style="color:${reportColors[i%reportColors.length]}">● ${esc(d.nick||d.name)}</span>`).join('');
+ const all=drivers.map(d=>(d.laps||[]).map((_,i)=>d.laps.slice(0,i+1).reduce((a,b)=>a+b,0)));
+ const count=Math.max(1,...all.map(a=>a.length));
+ function chart(title,type){
+  const series=drivers.map(()=>[]); let ymax=type==='pos'?Math.max(1,drivers.length):1;
+  for(let lap=0;lap<count;lap++){
+   const order=all.map((a,i)=>({i,t:a[lap]})).filter(v=>v.t!=null).sort((a,b)=>a.t-b.t);
+   order.forEach((v,pos)=>{const value=type==='pos'?pos+1:(v.t-order[0].t)/1000;series[v.i].push([lap+1,value]);ymax=Math.max(ymax,value);});
+  }
+  const y=v=>type==='pos'?40+(v-1)*240/Math.max(1,ymax-1):280-v/ymax*240;
+  const grid=Array.from({length:6},(_,i)=>{let v=type==='pos'?1+(ymax-1)*i/5:ymax*i/5;return `<line x1="55" y1="${y(v)}" x2="950" y2="${y(v)}" stroke="#e0e5eb"/><text x="8" y="${y(v)+4}" font-size="11" fill="#64748b">${type==='pos'?'P':''}${v.toFixed(type==='pos'?0:1)}</text>`;}).join('');
+  const x=v=>55+(v-1)*895/Math.max(1,count-1);
+  const lines=series.map((points,i)=>`<polyline fill="none" stroke="${reportColors[i%reportColors.length]}" stroke-width="2" points="${points.map(p=>`${x(p[0])},${y(p[1])}`).join(' ')}"/>${points.map(p=>`<circle cx="${x(p[0])}" cy="${y(p[1])}" r="3" fill="${reportColors[i%reportColors.length]}"/>`).join('')}`).join('');
+  const labels=Array.from({length:count},(_,i)=>i+1).filter(n=>n===1||n===count||n%Math.max(1,Math.ceil(count/12))===0).map(n=>`<text x="${x(n)}" y="305" font-size="11">${n}</text>`).join('');
+  return `<section class="report-chart"><h3>${title}</h3><svg viewBox="0 0 980 325">${grid}${lines}${labels}<text x="470" y="322" font-size="11">Lap</text></svg><div class="report-legend">${legend}</div></section>`;
+ }
+ const pace=drivers.map(d=>(cfg.start_mode==='grid'?d.laps.slice(1):d.laps).slice().sort((a,b)=>a-b));
+ const values=pace.flat();const low=Math.min(...values,Infinity),high=Math.max(...values,0);
+ let distribution='';
+ if(values.length){
+  const x=v=>160+(v-low)/Math.max(1,high-low)*760;
+  distribution=pace.map((laps,i)=>{if(!laps.length)return '';const n=laps.length,median=(laps[Math.floor((n-1)/2)]+laps[Math.floor(n/2)])/2;
+   const y=30+i*32;return `<text x="4" y="${y+4}" font-size="12">${esc(drivers[i].nick||drivers[i].name)}</text><line x1="${x(laps[0])}" y1="${y}" x2="${x(laps[n-1])}" y2="${y}" stroke="#eeb2ac" stroke-width="12"/><line x1="${x(laps[Math.floor((n-1)*.25)])}" y1="${y}" x2="${x(laps[Math.floor((n-1)*.75)])}" y2="${y}" stroke="#dc6357" stroke-width="12"/><line x1="${x(median)}" y1="${y-9}" x2="${x(median)}" y2="${y+9}" stroke="#182b40" stroke-width="2"/>`;}).join('');
+  const y=pace.length*32+24;distribution+=Array.from({length:6},(_,i)=>{const v=low+(high-low)*i/5;return `<text x="${x(v)}" y="${y}" font-size="11">${(v/1000).toFixed(2)} s</text>`;}).join('');
+ }
+ return chart('Position progression','pos')+chart('Gap to leader · seconds','gap')+`<section class="report-chart"><h3>Lap time distribution · medians</h3><svg viewBox="0 0 980 ${Math.max(100,pace.length*32+50)}">${distribution||'<text x="20" y="40">Belum ada lap penuh</text>'}</svg><p class="note">Rentang min–max, kotak kuartil 25–75%, garis median. Segmen start grid tidak termasuk.</p></section>`;
+}
+let editMemberId=null;
+function openMember(id){
+ const m=DATA.member.find(x=>x.id===id)||{};editMemberId=m.id||null;
+ $('memberTitle').textContent=m.id?'Edit member':'Tambah member';
+ [['memberName','name'],['memberNick','nick'],['memberClass','kelas'],['memberCar','mobil']].forEach(([id,k])=>$(id).value=m[k]||'');
+ $('memberTransponders').value=(m.transponder||[]).join(', ');$('modalMember').hidden=false;$('memberName').focus();
+}
+$('addMember').onclick=()=>openMember();
+$('importMembers').onclick=()=>$('memberFile').click();
+$('memberFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{
+ const data=JSON.parse(await f.text());const result=await api('/api/members/import',{members:Array.isArray(data)?data:data.members});
+ DATA.member=result.members;renderMember();toast(result.count+' member diimpor secara lokal');
+ }catch(err){gagal(err);}finally{e.target.value='';}};
+$('memberCancel').onclick=()=>$('modalMember').hidden=true;
+$('memberForm').onsubmit=async e=>{
+ e.preventDefault();try{
+ const res=await api('/api/member',{id:editMemberId,name:$('memberName').value,nick:$('memberNick').value,kelas:$('memberClass').value,mobil:$('memberCar').value,transponder:$('memberTransponders').value});
+ DATA.member=res.members;$('modalMember').hidden=true;renderMember();toast('Member tersimpan lokal');
+ }catch(err){gagal(err);}
+};
+$('memberList').addEventListener('click',e=>{const b=e.target.closest('[data-edit-member]');if(b)openMember(b.dataset.editMember);});
+let reportRaceId=null;
+$('sesiPdf').onclick=async()=>{
+ if(!reportRaceId)return;
+ try{const r=await fetch(BASE+'/api/races/'+encodeURIComponent(reportRaceId)+'/pdf');if(!r.ok)throw Error('Ekspor PDF gagal');
+ const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download='YurLaps-race.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+ }catch(e){gagal(e);}
+};
 
 (async function init(){
   try{
@@ -1226,6 +1266,7 @@ window.addEventListener('unhandledrejection', ev => {
       : fmtClock((sesi && sesi.elapsed_ms) || 0);
     if(st === 'live') mulaiTick();
     segarkanDecoder();
+    refreshCloud();
   }catch(e){
     toast(e.message || 'Gagal memuat data dari layanan lokal');
     document.body.insertAdjacentHTML('beforeend',

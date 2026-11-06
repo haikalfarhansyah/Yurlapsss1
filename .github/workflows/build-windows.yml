@@ -2,19 +2,23 @@ name: Build Windows
 
 on:
   push:
-    branches: [main]
+    branches: [main, "codex/website-club-sync"]
     tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
       make_installer:
-        description: "Buat installer juga"
+        description: "Buat installer pembaruan Inno juga (NSIS selalu dibuat)"
         type: boolean
         default: true
 
 permissions:
   contents: read
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -22,13 +26,14 @@ jobs:
   # ---------------------------------------------------------------------------
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install dependensi
-        run: pip install pyzmq flask pyinstaller
+        run: pip install -r requirements.txt flask pyinstaller
       - name: Pastikan paket yang diunggah versi terbaru
         run: |
           test -f VERSI-PAKET.txt || { echo "VERSI-PAKET.txt tidak ada: zip lama"; exit 1; }
@@ -44,6 +49,8 @@ jobs:
         run: python tests/test_smoke.py
         env:
           YURLAPS_DATA: ${{ runner.temp }}/yl-smoke
+      - name: Tes race offline dan laporan PDF
+        run: python -m unittest discover -s tests -p "test_*.py"
       - name: Tes integrasi REST + SSE
         run: python tests/test_integration.py
         env:
@@ -61,6 +68,7 @@ jobs:
   decoder:
     needs: test
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -223,6 +231,7 @@ jobs:
   build:
     needs: [test, decoder]
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -232,7 +241,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Deteksi folder proyek
         id: detect
@@ -282,6 +291,10 @@ jobs:
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
         run: |
+          # upload-artifact preserves decoder-out/ beside the source archive.
+          if (Test-Path "vendor\openstint\decoder-out") {
+            Move-Item vendor\openstint\decoder-out\* vendor\openstint\ -Force
+          }
           $exe = Get-ChildItem vendor\openstint -Filter "YurLapsDecoder*" -ErrorAction SilentlyContinue
           if ($exe) {
             Write-Host "OK: memakai decoder YurLaps ($($exe[0].Name))"
@@ -289,7 +302,7 @@ jobs:
               throw "ATTRIBUTION.txt tidak ada: atribusi GPL-3.0 wajib ikut"
             }
           } else {
-            Write-Host "Catatan: decoder YurLaps belum tersedia; aplikasi tetap dibangun."
+            throw "YurLapsDecoder.exe tidak ada di paket decoder"
           }
 
       # ---- 2a. Mesin (tanpa Tk, dipanggil jendela Electron) ----
@@ -301,8 +314,10 @@ jobs:
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
         run: |
-          if (-not (Test-Path "desktop\engine\_internal\app\static\index.html")) {
-            throw "UI web (app/static) tidak ikut dibundel - mesin akan menampilkan 404"
+          foreach ($file in @("index.html", "quickrace.html", "quickrace.js")) {
+            if (-not (Test-Path "desktop\engine\_internal\app\static\$file")) {
+              throw "UI web $file tidak ikut dibundel"
+            }
           }
           Write-Host "OK: UI ada di dalam bundel mesin"
 
@@ -318,9 +333,14 @@ jobs:
           $psi.RedirectStandardInput = $true
           $psi.UseShellExecute = $false
           $p = [System.Diagnostics.Process]::Start($psi)
-          $line = $p.StandardOutput.ReadLine()
+          $ready = $p.StandardOutput.ReadLineAsync()
+          if (-not $ready.Wait(60000)) { $p.Kill(); throw "mesin tidak siap dalam 60 detik" }
+          $line = $ready.Result
           Write-Host "BARIS PERTAMA:" $line
-          if (-not $line.Contains('"event": "ready"')) { throw "mesin tidak mengirim ready" }
+          if (-not $line -or -not $line.Contains('"event": "ready"')) {
+            if (-not $p.HasExited) { $p.Kill() }
+            throw "mesin tidak mengirim ready"
+          }
           $p.StandardInput.Close()
           if (-not $p.WaitForExit(20000)) { $p.Kill(); throw "mesin tidak berhenti saat stdin ditutup" }
           Write-Host "OK: mesin siap dan berhenti rapi"
@@ -334,12 +354,12 @@ jobs:
         working-directory: ${{ steps.detect.outputs.root }}/desktop
         env:
           YURLAPS_PYTHON: python
+          YURLAPS_ENGINE: ${{ github.workspace }}/${{ steps.detect.outputs.root }}/desktop/engine/YurLapsEngine.exe
         run: npx electron test/smoke.js
 
       # ---- 2c. Installer Inno (jalur pembaruan /UPDATEZIP) ----
-      # Urutannya penting: Inno harus SELESAI sebelum app.asar dibangun, karena
-      # electron-builder menyalin YurLaps-Setup.exe ke dalam paketnya sebagai
-      # extraResources. Kalau urutannya dibalik, file itu belum ada.
+      # Install Inno sebelum electron-builder; kompilasi dilakukan setelah
+      # win-unpacked tersedia agar installer pembaruan berisi aplikasi lengkap.
       - name: Install Inno Setup
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.make_installer }}
         shell: pwsh
@@ -378,7 +398,7 @@ jobs:
 
       - name: Siapkan manifest pembaruan (update.json)
         working-directory: ${{ steps.detect.outputs.root }}
-        run: python tools/buat_update_manifest.py
+        run: python tools/buat_update_manifest.py --dir dist-electron
 
       - name: Ringkasan artefak
         working-directory: ${{ steps.detect.outputs.root }}
@@ -403,8 +423,6 @@ jobs:
             ${{ steps.detect.outputs.root }}/dist-electron/*.zip
             ${{ steps.detect.outputs.root }}/dist/*-full.exe
             ${{ steps.detect.outputs.root }}/dist/*.json
-          if-no-files-found: warn
-
-  # ---------------------------------------------------------------------------
-  # 3. Mode Tk lama (Windows 8/8.1): tetap dibangun sebagai alternatif
-  # ---------------------------------------------------------------------------
+            ${{ steps.detect.outputs.root }}/vendor/openstint/yurlaps-decoder-src.zip
+            ${{ steps.detect.outputs.root }}/vendor/openstint/upstream-commit.txt
+          if-no-files-found: error

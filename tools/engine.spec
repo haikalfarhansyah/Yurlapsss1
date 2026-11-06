@@ -43,7 +43,8 @@ a = Analysis(
     # server lokal. Tanpa ini aplikasi hasil build menampilkan 404.
     datas=_datas(),
     hiddenimports=[
-        "app.webapp",
+        "app.webapp", "app.cloud", "app.cloud_credentials", "app.cloud_entities",
+        "app.member_sync", "app.race_upload", "app.club", "app.race_report", "app.race_results",
         "app.native",          # diimpor oleh modul main walau tidak dipakai
         "app.devices",
         "app.updater",
@@ -54,7 +55,7 @@ a = Analysis(
     runtime_hooks=[],
     # Jendela aplikasi ditangani Electron: Tk, webview, pythonnet dibuang.
     excludes=[
-        "tkinter", "_tkinter", "PIL", "Pillow",
+        "tkinter", "_tkinter",
         "webview", "clr", "pythonnet", "clr_loader", "System",
         "matplotlib", "numpy", "pandas", "scipy",
         "test", "unittest",
