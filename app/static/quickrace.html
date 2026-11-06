@@ -406,6 +406,7 @@
     <div class="topbar">
       <div class="where">Club: <b id="topClub">—</b> · Track: <b id="topTrack">—</b></div>
       <span class="pill offline" id="pill"><span class="dot"></span><span id="pilltxt">Offline — 0 sesi belum diunggah</span></span>
+      <button class="btn" id="btnUpdates">Pembaruan</button>
       <button class="account-btn" id="btnAkun" title="Panel akun">
         <span class="avatar" id="akunAv">—</span>
         <span class="who"><b id="akunNick">—</b><span id="akunRole">lokal · belum masuk</span></span>
@@ -861,7 +862,16 @@
   </div>
 </div>
 
+<div class="modal" id="modalUpdates" hidden><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
+<h2 id="updateTitle">Pembaruan YurLaps</h2>
+<p class="sub" id="updateVersion"></p><p id="updateStatus" role="status">Memuat...</p>
+<progress id="updateProgress" max="100" value="0" hidden style="width:100%"></progress>
+<pre id="updateNotes" style="white-space:pre-wrap;font:inherit"></pre>
+<p class="note">Simpan race sebelum memasang. Aplikasi ditutup sementara untuk menyimpan latihan dan memasang versi baru. Data akun, hasil, dan antrean tetap disimpan.</p>
+<div class="foot"><button class="btn" id="updateClose">Tutup</button><button class="btn primary" id="updateAction">Cek pembaruan</button></div>
+</div></div>
 <script src="/static/quickrace.js"></script>
+<script src="/static/updates.js"></script>
 
 
 </body>

@@ -211,6 +211,30 @@ if (!app.requestSingleInstanceLock()) {
     try {
       await startEngine();
       createWindow();
+      const { autoUpdater } = require('electron-updater');
+      const { configureUpdates } = require('./updates');
+      const backend = async action => {
+        const response = await fetch(engineUrl + 'api/update/' + action, { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || 'Pembaruan belum dapat dipasang');
+      };
+      configureUpdates({ app, ipcMain, autoUpdater, getWindow: () => win,
+        prepare: () => backend('prepare'), cancel: () => backend('cancel'),
+        stopEngine: () => new Promise((resolve, reject) => {
+          const child = engine;
+          if (!child || child.exitCode !== null) return reject(new Error('Mesin timing tidak aktif'));
+          app.isQuiting = true;
+          const timer = setTimeout(() => {
+            child.removeListener('exit', done);
+            app.isQuiting = false;
+            reject(new Error('Mesin belum berhenti. Tunggu penyimpanan selesai sebelum mencoba lagi.'));
+          }, 20000);
+          function done() { clearTimeout(timer); engine = null; resolve(); }
+          child.once('exit', done);
+          child.stdin.end();
+        })
+      });
     } catch (err) {
       dialog.showErrorBox('YurLaps gagal dijalankan', String(err && err.message ? err.message : err));
       app.isQuiting = true;

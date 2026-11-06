@@ -444,6 +444,12 @@ lintasan mana yang rawan hilang. Semua kolom ini juga tersimpan di database
 
 ## 7. Pembaruan aplikasi (update)
 
+Pada Windows versi Electron, menu **Pembaruan** memakai GitHub Releases. Aplikasi
+memeriksa rilis stabil terbaru, mengunduh paket melalui `electron-updater`, lalu
+memasang update setelah race disimpan. Aplikasi ditutup dan dibuka kembali selama
+file program diganti; pengguna tidak perlu uninstall. Data `%APPDATA%\\YurLaps`
+dan antrean sinkronisasi tidak disentuh. Rilis draft tidak ditawarkan ke pengguna.
+
 Supaya pembaruan tidak perlu "kirim zip lewat WhatsApp":
 
 1. Saat build, workflow membuat `update.json` (lewat

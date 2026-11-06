@@ -92,6 +92,7 @@ class AppContext:
         self._club_lock = threading.RLock()
         self.decoder_manager = None
         self.updater = None
+        self.update_pending = False
         self.start_time = time.time()
         previous_event = engine.on_event
         def route_event(event):
@@ -536,7 +537,10 @@ def make_handler(ctx: AppContext):
 
             if path == "/api/race/start":
                 try:
-                    snap = ctx.race.mulai()
+                    with ctx._club_lock:
+                        if ctx.update_pending:
+                            return self._err(409, "Pembaruan sedang dipasang")
+                        snap = ctx.race.mulai()
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "race": snap})
@@ -769,6 +773,18 @@ def make_handler(ctx: AppContext):
                 probe = ctx.decoder_manager.probe(timeout=12)
                 return self._json(probe)
 
+            if path in ("/api/update/prepare", "/api/update/cancel"):
+                if not self._cloud_local():
+                    return self._err(403, "Pembaruan hanya dari komputer ini")
+                with ctx._club_lock, ctx.race.lock:
+                    if path.endswith("cancel"):
+                        ctx.update_pending = False
+                    else:
+                        if ctx.race.status != "idle":
+                            return self._err(409, "Selesaikan dan simpan race sebelum memasang pembaruan")
+                        ctx.update_pending = True
+                return self._json({"ok": True})
+
             if path == "/api/update/check":
                 if ctx.updater is None:
                     return self._json({"ok": False, "error": "updater tidak aktif"})
@@ -784,6 +800,10 @@ def make_handler(ctx: AppContext):
             if path == "/api/update/apply":
                 if ctx.updater is None:
                     return self._json({"ok": False, "error": "updater tidak aktif"})
+                if os.environ.get("YURLAPS_ELECTRON") == "1":
+                    return self._err(409, "Gunakan menu Pembaruan aplikasi Electron")
+                if ctx.race.status != "idle":
+                    return self._err(409, "Simpan race sebelum memasang pembaruan")
                 ok, msg = ctx.updater.apply_and_restart()
                 return self._json({"ok": ok, "message": msg})
 

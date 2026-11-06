@@ -64,6 +64,17 @@
       "createStartMenuShortcut": true,
       "shortcutName": "YurLaps",
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Khasya207",
+        "repo": "Yurlapsss",
+        "releaseType": "draft"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
   }
 }

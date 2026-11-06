@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('yurlapsShell', {
   /** true = dibuka di jendela aplikasi (bukan di browser biasa) */
   isAppWindow: true,
   platform: process.platform,
+  update: action => ipcRenderer.invoke('yurlaps:update', action),
+  onUpdate: cb => ipcRenderer.on('yurlaps:update-state', (_event, state) => cb(state)),
   /** versi jendela (bukan versi mesin; versi mesin ada di /api/health) */
   version: process.env.npm_package_version || '',
   /** layar penuh untuk TV pit */
