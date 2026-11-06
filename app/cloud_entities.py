@@ -8,7 +8,8 @@ from .member_sync import _read_all
 
 KINDS = {
     "track": ("club_tracks", {"name": "name", "addr": "address", "width_m": "width_m",
-                             "loop_width_m": "loop_width_m", "note": "note", "best_ms": "best_ms", "holder": "holder"}),
+                             "loop_width_m": "loop_width_m", "note": "note", "best_ms": "best_ms", "holder": "holder",
+                             "min_lap_ms": "min_lap_ms", "active": "is_active"}),
     "preset": ("club_presets", {"name": "name", "target": "target", "value": "value",
                                 "rank": "rank", "start_mode": "start_mode", "cd": "cd", "sound": "sound"}),
 }
@@ -22,7 +23,10 @@ def remote_id(club_id, kind, local_id):
 
 
 def _data(row, kind):
-    return {remote: row.get(local) for local, remote in KINDS[kind][1].items()}
+    data = {remote: row.get(local) for local, remote in KINDS[kind][1].items()}
+    if kind == "track":
+        data["is_active"] = bool(row.get("active"))
+    return data
 
 
 def _install(conn, kind, local_id, row):

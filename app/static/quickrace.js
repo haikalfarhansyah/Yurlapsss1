@@ -57,7 +57,8 @@ function mmss(v){
 const RUTE_POST = ['/api/race/track','/api/race/cfg','/api/race/peserta',
   '/api/race/start','/api/race/go','/api/race/pass','/api/race/finish',
   '/api/race/reset','/api/race/save','/api/race/discard','/api/race/upload',
-  '/api/track','/api/track/delete','/api/tracks/sync','/api/preset','/api/preset/delete'];
+  '/api/track','/api/track/delete','/api/tracks/sync','/api/preset','/api/preset/delete',
+  '/api/practice/visibility'];
 async function api(path, body){
   const opt = { headers: {} };
   if(body !== undefined || RUTE_POST.includes(path)){
@@ -121,7 +122,7 @@ async function muatAwal(){
   DATA.member = b.members || [];
   DATA.preset = b.presets || [];
   sesi = b.race;
-  state.trackId = sesi.track_id || (DATA.track[0] && DATA.track[0].id) || null;
+  state.trackId = sesi.track_id || ((DATA.track.find(t => t.active) || DATA.track[0]) || {}).id || null;
   const c = sesi.cfg || {};
   const cocok = DATA.preset.find(p => p.name === c.nama);
   state.presetId = cocok ? cocok.id : ((DATA.preset[0] && DATA.preset[0].id) || null);
@@ -144,15 +145,34 @@ async function segarkanSesi(){
   return sesi;
 }
 
+let practiceState = null;
+async function refreshPractice(){
+  try {
+    const [live, history] = await Promise.all([api('/api/practice/state'), api('/api/practice/history')]);
+    practiceState = live.practice || {};
+    const rows = history.sessions || [];
+    const active = practiceState.session;
+    $('practiceStatus').innerHTML = `<span class="dot"></span><span>${practiceState.active ? 'Aktif otomatis' : 'Menunggu decoder'}</span>`;
+    $('practiceTrack').textContent = active?.track_name || '—';
+    const count = Object.values(active?.laps || {}).reduce((n, laps) => n + laps.length, 0);
+    $('practiceLive').innerHTML = active
+      ? `<b>${count} lap tercatat</b><div class="note">Practice berjalan otomatis. Saat race dimulai, sesi ini ditutup dan disimpan.</div>`
+      : '<b>Belum ada sesi aktif</b>Practice mulai otomatis ketika decoder membaca lintasan.';
+    $('practiceHistory').innerHTML = rows.length ? rows.slice(0, 8).map(row => `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line2)"><span>${esc(row.track_name || 'Track')}</span><b>${Object.values(row.laps || {}).reduce((n, laps) => n + laps.length, 0)} lap</b></div>`).join('') : 'Belum ada sesi.';
+  } catch (error) { /* offline UI keeps prior state */ }
+}
+setInterval(() => { if ($('view-practice')?.style.display !== 'none') refreshPractice(); }, 3000);
+
 /* ============================================================================
    NAVIGASI
    ========================================================================== */
-const VIEWS = ['quickrace','history','member','track','decoder'];
+const VIEWS = ['quickrace','practice','history','member','track','decoder'];
 function show(v){
   VIEWS.forEach(k => { const s = $('view-' + k); if(s) s.style.display = (k === v) ? '' : 'none'; });
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.view === v));
   window.scrollTo(0,0);
   if(v === 'history') renderHistory();
+  if(v === 'practice') refreshPractice();
   if(v === 'member') renderMember();
   if(v === 'track') renderTrackPage();
   if(v === 'decoder'){ segarkanDecoder(); renderDecoderLog(); }
@@ -174,7 +194,7 @@ function renderTrackSelect(){
   $('footTrack').textContent = t.name;
   const nSesi = t.n_race || 0;
   $('trackMeta').innerHTML =
-    `<b>${nSesi} sesi di track ini</b><span>Rekor: ${fmtLap(t.best_ms)} · ${esc(t.holder || '—')}`
+    `<b>${nSesi} sesi di track ini</b><span>${t.active ? 'aktif untuk decoder' : 'tidak aktif'} · min lap ${(Number(t.min_lap_ms || 1500) / 1000).toFixed(1)} detik · Rekor: ${fmtLap(t.best_ms)} · ${esc(t.holder || '—')}`
     + (t.loop_width_m ? ` · lebar loop ${t.loop_width_m} m` : ' · lebar loop belum diisi') + `</span>`;
   $('trackSrc').textContent = t.synced ? 'dari website' : 'lokal · belum sinkron';
 }
@@ -199,6 +219,7 @@ function renderChips(){
   let html = chips.map(([k,v]) => `<span class="chip">${k}: <b>${esc(v)}</b></span>`).join('');
   const t = trackAktif();
   if(t && !t.loop_width_m) html += `<span class="chip warn">Lebar loop belum diisi — km/h tidak dihitung</span>`;
+  if(t) html += `<span class="chip">Min lap: <b>${(Number(t.min_lap_ms || 1500) / 1000).toFixed(1)} detik</b></span>`;
   if(!state.peserta.length) html += `<span class="chip warn">Belum ada peserta</span>`;
   $('chips').innerHTML = html;
   $('qrTitle').textContent = (c.nama || 'Quick Race') + (t ? ' · ' + t.name : '');
@@ -676,10 +697,10 @@ function renderTrackPage(){
   wrap.innerHTML = DATA.track.map(t => `
     <div class="trackrow" data-id="${t.id}">
       <span class="ico"><svg viewBox="0 0 24 24"><path d="M5 5c-4 0-4 14 0 14h4c4 0 2-6 6-6h3c5 0 5-8 0-8z"/></svg></span>
-      <span class="who"><b>${esc(t.name)} ${t.synced
+      <span class="who"><b>${esc(t.name)} ${t.active ? '<span class="badge-sync ya">aktif decoder</span>' : ''} ${t.synced
         ? '<span class="badge-sync ya">tersinkron</span>'
         : '<span class="badge-sync belum">belum sinkron</span>'}</b>
-        <span>${esc(t.addr || '—')}${t.loop_width_m ? ' · lebar loop ' + t.loop_width_m + ' m' : ' · lebar loop belum diisi'}</span></span>
+        <span>${esc(t.addr || '—')}${t.loop_width_m ? ' · lebar loop ' + t.loop_width_m + ' m' : ' · lebar loop belum diisi'} · min lap ${(Number(t.min_lap_ms || 1500) / 1000).toFixed(1)} detik</span></span>
       <span class="rec"><b>${fmtLap(t.best_ms)}</b>${esc(t.holder || '—')}</span>
       <span class="act">
         <button class="btn sm" data-act="edit">Edit</button>
@@ -720,7 +741,9 @@ function bukaTrack(id){
   $('trkName').value = t ? t.name : '';
   $('trkAddr').value = t ? (t.addr || '') : '';
   $('trkWidth').value = t ? (t.loop_width_m || '') : '';
+  $('trkMinLap').value = t ? (Number(t.min_lap_ms || 1500) / 1000) : 1.5;
   $('trkNote').value = t ? (t.note || '') : '';
+  $('trkActive').checked = !!(t && t.active);
   hitungTrack();
   $('modalTrack').hidden = false;
 }
@@ -736,12 +759,13 @@ $('trkSave').onclick = async () => {
   const name = $('trkName').value.trim();
   if(!name){ toast('Nama track belum diisi'); $('trkName').focus(); return; }
   const body = { name, addr: $('trkAddr').value.trim(),
-    loop_width_m: $('trkWidth').value || null, note: $('trkNote').value.trim() };
+    loop_width_m: $('trkWidth').value || null, min_lap_s: $('trkMinLap').value || 1.5,
+    active: $('trkActive').checked, note: $('trkNote').value.trim() };
   if(editTrackId) body.id = editTrackId;
   try{
     const r = await api('/api/track', body);
     DATA.track = r.tracks;
-    if(editTrackId === state.trackId || !editTrackId){
+    if(r.track.active || editTrackId === state.trackId){
       state.trackId = r.track.id;
       if(!sedangJalan()) await api('/api/race/track', { track_id: r.track.id });
       sesi = await segarkanSesi();
@@ -926,7 +950,7 @@ async function renderHistory(){
       <td class="best r">${fmtLap(r2.best)}</td>
       <td class="num r">${fmtClock(durasi)}</td>
       <td class="r">${badge}</td>
-      <td class="r"><button class="btn sm" data-act="kirim">Unggah</button></td>
+      <td class="r"><button class="btn sm" data-act="kirim">Coba sync</button></td>
     </tr>`;
   }).join('');
 

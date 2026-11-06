@@ -30,6 +30,11 @@ def remote_race_id(club_id: str, local_id: str) -> str:
     return str(uuid.uuid5(uuid.UUID(club_id), "yurlaps-race:" + local_id))
 
 
+def remote_practice_id(club_id: str, local_id: str, driver_key: str) -> str:
+    """Stable remote id per local practice session and driver account/transponder."""
+    return str(uuid.uuid5(uuid.UUID(club_id), "yurlaps-practice:" + local_id + ":" + driver_key))
+
+
 def race_payload(race: dict, user_id: str) -> dict:
     club_id = str(uuid.UUID(race["club_id"]))
     raced_at = datetime.datetime.fromtimestamp(
@@ -94,6 +99,51 @@ class SupabaseRaceClient:
         if not isinstance(receipt, dict) or receipt.get("id") != payload["id"] or receipt.get("club_id") != payload["club_id"]:
             raise UploadError("Server belum mengonfirmasi hasil untuk club ini")
         return receipt["id"]
+
+    def upload_practice(self, payload: dict) -> str:
+        receipt = self._request("/rest/v1/rpc/desktop_upload_practice", "POST", {"p_payload": payload})
+        if not isinstance(receipt, dict) or receipt.get("id") != payload["id"]:
+            raise UploadError("Server belum mengonfirmasi practice")
+        return receipt["id"]
+
+
+def practice_payload(session: dict, club_id: str, user_id: str, driver: dict) -> dict:
+    club_id = str(uuid.UUID(club_id))
+    linked_id = driver.get("driver_id")
+    try:
+        linked_id = str(uuid.UUID(str(linked_id))) if linked_id else None
+    except (ValueError, TypeError, AttributeError):
+        linked_id = None
+    driver_key = str(linked_id or driver.get("transponder"))
+    started = datetime.datetime.fromtimestamp(float(session["started_at"]), datetime.timezone.utc).isoformat()
+    ended = datetime.datetime.fromtimestamp(float(session.get("ended_at") or session["started_at"]), datetime.timezone.utc).isoformat()
+    return {
+        "id": remote_practice_id(club_id, session["id"], driver_key),
+        "source_session_id": session["id"], "club_id": club_id,
+        "user_id": linked_id,
+        "track_id": session.get("track_id"), "track_name": session.get("track_name") or "",
+        "started_at": started, "ended_at": ended,
+        "visibility": session.get("visibility") if session.get("visibility") in ("private", "public") else "private",
+        "laps": [{"transponder": driver.get("transponder"), "driver": driver.get("driver"),
+                  "nickname": driver.get("nickname"), "class": driver.get("class"),
+                  "lap_ms": list(driver.get("laps_ms") or [])}],
+        "summary": {"best_ms": driver.get("best_ms"), "lap_count": len(driver.get("laps_ms") or []),
+                    "source_session_id": session["id"], "uploaded_by": user_id},
+    }
+
+
+def upload_pending_practice(store: ClubStore, club_id: str, user_id: str, client, limit: int = 200) -> int:
+    club_id = str(uuid.UUID(club_id)); user_id = str(uuid.UUID(user_id)); uploaded = 0
+    for session in store.practice_sessions(limit, pending_only=True):
+        drivers = session.get("drivers") or []
+        if not drivers:
+            store.tandai_practice_terkirim(session["id"]); continue
+        for driver in drivers:
+            payload = practice_payload(session, club_id, user_id, driver)
+            client.upload_practice(payload)
+        store.tandai_practice_terkirim(session["id"])
+        uploaded += 1
+    return uploaded
 
 
 def upload_pending(store: ClubStore, club_id: str, user_id: str, client,

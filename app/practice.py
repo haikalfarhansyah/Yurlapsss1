@@ -12,7 +12,7 @@ import uuid
 
 
 class PracticeRecorder:
-    def __init__(self):
+    def __init__(self, on_close=None):
         self.lock = threading.RLock()
         self.active = False
         self.session_id = None
@@ -23,6 +23,8 @@ class PracticeRecorder:
         self.last_ts = {}
         self.history = []
         self.visibility = "private"
+        self.min_lap_ms = 1500
+        self.on_close = on_close
 
     def tick(self, *, race_status, track=None, now=None):
         with self.lock:
@@ -32,6 +34,7 @@ class PracticeRecorder:
                 self.session_id = str(uuid.uuid4())
                 self.track_id = (track or {}).get("id")
                 self.track_name = (track or {}).get("name", "")
+                self.min_lap_ms = int((track or {}).get("min_lap_ms") or 1500)
                 self.started_at = now or time.time()
                 self.laps = {}
                 self.last_ts = {}
@@ -47,19 +50,28 @@ class PracticeRecorder:
             if previous is None:
                 return
             lap = int(decoder_ts) - previous
-            if 500 < lap < 600000:
+            if self.min_lap_ms <= lap < 600000:
                 self.laps.setdefault(str(transponder), []).append(lap)
 
     def _close(self, ended_at):
+        closed = None
         if self.session_id:
-            self.history.insert(0, {
+            closed = {
                 "id": self.session_id, "track_id": self.track_id,
                 "track_name": self.track_name, "started_at": self.started_at,
                 "ended_at": ended_at, "laps": self.laps,
                 "visibility": self.visibility,
-            })
+            }
+            self.history.insert(0, closed)
             del self.history[50:]
         self.active = False
+        if closed and self.on_close and any(closed.get("laps", {}).values()):
+            try:
+                self.on_close(dict(closed))
+            except Exception:
+                # Timing must continue even if local persistence is unavailable.
+                pass
+        return closed
 
     def snapshot(self):
         with self.lock:
@@ -74,3 +86,10 @@ class PracticeRecorder:
             raise ValueError("visibility harus private atau public")
         with self.lock:
             self.visibility = visibility
+            if self.session_id:
+                for row in self.history:
+                    if row.get("id") == self.session_id:
+                        row["visibility"] = visibility
+                if self.active:
+                    # snapshot reads this value for the UI; persistence is done by the server.
+                    pass

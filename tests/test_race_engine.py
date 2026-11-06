@@ -73,6 +73,14 @@ class OfflineRaceTests(unittest.TestCase):
         self.assertEqual(kmh(.5,100000),18)
         for w,d in [(None,90000),(.3,0),(.3,-1),(0,90000),(float('nan'),90000)]:self.assertIsNone(kmh(w,d))
 
+    def test_active_track_controls_minimum_lap_time(self):
+        track = self.store.tracks()[0]
+        self.store.save_track({"id": track["id"], "name": track["name"],
+                               "loop_width_m": .3, "min_lap_s": 2.5, "active": True})
+        fresh = __import__("app.race", fromlist=["RaceEngine"]).RaceEngine(self.store)
+        self.assertEqual(fresh.track_id, track["id"])
+        self.assertEqual(fresh.cfg["min_lap_ms"], 2500)
+
     def test_archive_preserves_raw_timing_speed_and_track_snapshot(self):
         self.go();self.passing(11000,duration=90000);self.passing(21000,duration=60000)
         self.race.selesai();info=self.race.simpan('Offline final')

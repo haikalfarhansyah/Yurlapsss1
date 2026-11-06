@@ -31,7 +31,7 @@ from typing import Optional
 
 from .config import default_data_dir
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS track (
     note        TEXT,
     best_ms     INTEGER,
     holder      TEXT,
+    min_lap_ms  INTEGER NOT NULL DEFAULT 1500,
+    active      INTEGER NOT NULL DEFAULT 0,
     synced      INTEGER DEFAULT 0,    -- 0 belum sinkron ke web
     updated_at  REAL
 );
@@ -120,6 +122,18 @@ CREATE TABLE IF NOT EXISTS race_lap (
     rssi        REAL,
     dur_us      INTEGER,
     skip        INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS practice_session (
+    id          TEXT PRIMARY KEY,
+    club_id     TEXT,
+    track_id    TEXT,
+    track_name  TEXT NOT NULL DEFAULT '',
+    started_at  REAL NOT NULL,
+    ended_at    REAL,
+    visibility  TEXT NOT NULL DEFAULT 'private',
+    sync        TEXT NOT NULL DEFAULT 'belum',
+    result_json TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_lap_race ON race_lap (race_id, transponder);
@@ -196,13 +210,18 @@ class ClubStore:
             # PR #2 and older cloud prototypes both used version 2 differently.
             # Inspect columns rather than assuming what a version number means.
             additions = {
-                "track": {"loop_width_m": "REAL", "remote_revision": "INTEGER DEFAULT 0",
+                "track": {"loop_width_m": "REAL", "min_lap_ms": "INTEGER NOT NULL DEFAULT 1500",
+                          "active": "INTEGER NOT NULL DEFAULT 0", "remote_revision": "INTEGER DEFAULT 0",
                           "mutation_id": "TEXT", "deleted": "INTEGER DEFAULT 0", "sync_error": "TEXT"},
                 "race": {"club_id": "TEXT", "result_json": "TEXT"},
                 "preset": {"remote_revision": "INTEGER DEFAULT 0", "mutation_id": "TEXT",
                            "deleted": "INTEGER DEFAULT 0", "sync_error": "TEXT", "synced": "INTEGER DEFAULT 0"},
                 "member": {"source": "TEXT DEFAULT 'local'", "tts_name": "TEXT",
                            "transponder_details": "TEXT DEFAULT '[]'"},
+                "practice_session": {"club_id": "TEXT", "track_id": "TEXT",
+                           "track_name": "TEXT NOT NULL DEFAULT ''", "started_at": "REAL",
+                           "ended_at": "REAL", "visibility": "TEXT NOT NULL DEFAULT 'private'",
+                           "sync": "TEXT NOT NULL DEFAULT 'belum'", "result_json": "TEXT NOT NULL DEFAULT '{}'"},
             }
             for table, columns in additions.items():
                 present = {r[1] for r in conn.execute("PRAGMA table_info(" + table + ")")}
@@ -210,6 +229,9 @@ class ClubStore:
                     if column not in present:
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_race_pending ON race(club_id, sync, status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_practice_pending ON practice_session(club_id, sync, started_at)")
+            if conn.execute("SELECT COUNT(*) FROM track WHERE deleted=0 AND active=1").fetchone()[0] == 0:
+                conn.execute("UPDATE track SET active=1 WHERE id=(SELECT id FROM track WHERE deleted=0 ORDER BY name COLLATE NOCASE LIMIT 1)")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.execute("COMMIT")
         except Exception:
@@ -228,8 +250,8 @@ class ClubStore:
             c.execute("INSERT INTO club (id, club_id, name, role, synced_at) "
                       "VALUES (1, 'club-local', 'Club lokal', 'leader', NULL)")
         if self.club().get("club_id") in (None, "club-local") and not c.execute("SELECT 1 FROM track LIMIT 1").fetchone():
-            c.execute("INSERT INTO track (id,name,synced,updated_at) VALUES (?,?,0,?)",
-                      ("t-local", "Track lokal", now))
+            c.execute("INSERT INTO track (id,name,synced,updated_at,min_lap_ms,active) VALUES (?,?,0,?,?,1)",
+                      ("t-local", "Track lokal", now, 1500))
         if not c.execute("SELECT 1 FROM preset LIMIT 1").fetchone():
             for pid, name, target, value, rank, start, cd, sound in CONTOH_PRESET:
                 c.execute("INSERT INTO preset (id, name, target, value, rank, start_mode,"
@@ -264,7 +286,7 @@ class ClubStore:
         rows = self._conn.execute(
             "SELECT t.*, (SELECT COUNT(*) FROM race r WHERE r.track_id = t.id)"
             " AS n_race FROM track t WHERE t.deleted=0"
-            " ORDER BY t.synced ASC, t.name COLLATE NOCASE").fetchall()
+            " ORDER BY t.active DESC, t.synced ASC, t.name COLLATE NOCASE").fetchall()
         return [dict(r) for r in rows]
 
     @locked
@@ -288,18 +310,28 @@ class ClubStore:
             raise ValueError("Lebar loop harus angka")
         if lebar is not None and lebar <= 0:
             raise ValueError("Lebar loop harus lebih dari 0")
+        raw_min = data.get("min_lap_ms")
+        if raw_min in (None, "") and data.get("min_lap_s") not in (None, ""):
+            raw_min = float(data.get("min_lap_s")) * 1000
+        try:
+            min_lap_ms = int(round(float(raw_min))) if raw_min not in (None, "") else 1500
+        except (TypeError, ValueError):
+            raise ValueError("Minimum waktu lap harus angka dalam detik")
+        if min_lap_ms < 100:
+            raise ValueError("Minimum waktu lap harus minimal 0,1 detik")
+        active = 1 if data.get("active") in (True, 1, "1", "true", "on") else 0
 
         if tid and self.track(tid):
             self._conn.execute(
-                "UPDATE track SET name=?, addr=?, width_m=?, note=?, synced=0,"
+                "UPDATE track SET name=?, addr=?, width_m=?, note=?, min_lap_ms=?, active=?, synced=0,"
                 " updated_at=? WHERE id=?",
-                (nama, data.get("addr") or "", lebar, data.get("note") or "", now, tid))
+                (nama, data.get("addr") or "", lebar, data.get("note") or "", min_lap_ms, active, now, tid))
         else:
             tid = tid or str(uuid.uuid4())
             self._conn.execute(
                 "INSERT INTO track (id, name, addr, width_m, note, best_ms, holder,"
-                " synced, updated_at) VALUES (?,?,?,?,?,NULL,NULL,0,?)",
-                (tid, nama, data.get("addr") or "", lebar, data.get("note") or "", now))
+                " synced, updated_at, min_lap_ms, active) VALUES (?,?,?,?,?,NULL,NULL,0,?,?,?)",
+                (tid, nama, data.get("addr") or "", lebar, data.get("note") or "", now, min_lap_ms, active))
         width = data.get("loop_width_m")
         try:
             width = float(width) if width not in (None, "") else None
@@ -310,6 +342,10 @@ class ClubStore:
             self._conn.rollback()
             raise ValueError("Jarak antarkabel loop harus lebih dari nol")
         self._conn.execute("UPDATE track SET loop_width_m=? WHERE id=?", (width, tid))
+        if active:
+            self._conn.execute("UPDATE track SET active=0 WHERE id<>?", (tid,))
+        elif self._conn.execute("SELECT COUNT(*) FROM track WHERE deleted=0 AND active=1").fetchone()[0] == 0:
+            self._conn.execute("UPDATE track SET active=1 WHERE id=?", (tid,))
         self._conn.execute("UPDATE track SET mutation_id=?, sync_error=NULL WHERE id=?",
                            (str(uuid.uuid4()), tid))
         self._conn.commit()
@@ -319,8 +355,11 @@ class ClubStore:
     def delete_track(self, track_id: str) -> bool:
         if self._conn.execute("SELECT COUNT(*) FROM track WHERE deleted=0").fetchone()[0] <= 1:
             raise ValueError("Minimal satu track harus ada")
-        cur = self._conn.execute("UPDATE track SET deleted=1, synced=0, mutation_id=?, "
+        was_active = self._conn.execute("SELECT active FROM track WHERE id=?", (track_id,)).fetchone()
+        cur = self._conn.execute("UPDATE track SET deleted=1, active=0, synced=0, mutation_id=?, "
                                  "sync_error=NULL WHERE id=?", (str(uuid.uuid4()), track_id))
+        if was_active and was_active[0]:
+            self._conn.execute("UPDATE track SET active=1 WHERE id=(SELECT id FROM track WHERE deleted=0 ORDER BY name COLLATE NOCASE LIMIT 1)")
         self._conn.commit()
         return cur.rowcount > 0
 
@@ -458,6 +497,76 @@ class ClubStore:
             raise ValueError("Minimal satu preset harus ada")
         cur = self._conn.execute("UPDATE preset SET deleted=1, synced=0, mutation_id=?, "
                                  "sync_error=NULL WHERE id=?", (str(uuid.uuid4()), pid))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    # -- practice -------------------------------------------------------
+    @locked
+    def simpan_practice(self, session: dict, *, club_id: Optional[str] = None) -> str:
+        """Persist an automatic idle-practice session and its lap grouping.
+
+        The payload keeps transponder identity and driver metadata together so
+        an account link can be resolved later without changing old history.
+        """
+        sid = str(session.get("id") or uuid.uuid4())
+        data = dict(session)
+        data.setdefault("schema_version", 1)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO practice_session"
+            "(id,club_id,track_id,track_name,started_at,ended_at,visibility,sync,result_json)"
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (sid, club_id or self.club().get("club_id"), data.get("track_id"),
+             data.get("track_name") or "", float(data.get("started_at") or time.time()),
+             data.get("ended_at"), data.get("visibility") if data.get("visibility") in ("private", "public") else "private",
+             "belum", json.dumps(data, ensure_ascii=False)),
+        )
+        self._conn.commit()
+        return sid
+
+    @locked
+    def practice_sessions(self, limit: int = 200, *, pending_only: bool = False) -> list[dict]:
+        where = " WHERE sync != 'terkirim'" if pending_only else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM practice_session{where} ORDER BY started_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        out = []
+        for row in rows:
+            value = dict(row)
+            try:
+                payload = json.loads(value.get("result_json") or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            value.update(payload)
+            value["sync"] = row["sync"]
+            out.append(value)
+        return out
+
+    @locked
+    def practice(self, sid: str) -> Optional[dict]:
+        rows = self.practice_sessions(1000)
+        return next((row for row in rows if row.get("id") == sid), None)
+
+    @locked
+    def tandai_practice_terkirim(self, sid: str, remote_id: Optional[str] = None) -> bool:
+        cur = self._conn.execute(
+            "UPDATE practice_session SET sync='terkirim' WHERE id=?", (sid,))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    @locked
+    def set_practice_visibility(self, sid: str, visibility: str) -> bool:
+        if visibility not in ("private", "public"):
+            raise ValueError("visibility harus private atau public")
+        row = self._conn.execute("SELECT result_json FROM practice_session WHERE id=?", (sid,)).fetchone()
+        if not row:
+            return False
+        try:
+            payload = json.loads(row["result_json"] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        payload["visibility"] = visibility
+        cur = self._conn.execute("UPDATE practice_session SET visibility=?, sync='belum', result_json=? WHERE id=?",
+                                 (visibility, json.dumps(payload, ensure_ascii=False), sid))
         self._conn.commit()
         return cur.rowcount > 0
 

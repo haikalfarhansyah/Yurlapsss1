@@ -378,6 +378,10 @@
       <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5 21V4l7 4 7-4v11l-7 4-7-2z"/></svg> Quick Race
     </button>
+    <button class="tab" data-view="practice">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 17l4-5 3 3 5-7 4 3"/><path d="M4 21h16"/></svg> Practice
+    </button>
     <button class="tab" data-view="history">
       <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> History Race
@@ -523,6 +527,25 @@
       </div>
     </div>
 
+    <!-- ==================== PRACTICE ==================== -->
+    <div class="page" id="view-practice" style="display:none">
+      <div class="head">
+        <div><h1>Practice</h1>
+          <div class="lead">Practice otomatis aktif saat tidak ada Quick Race. Race akan menjedanya.</div></div>
+        <span class="pill offline" id="practiceStatus"><span class="dot"></span><span>Menunggu...</span></span>
+      </div>
+      <div class="grid">
+        <div class="big">
+          <div class="big-bar"><span>Sesi practice aktif</span><span style="margin-left:auto" id="practiceTrack">—</span></div>
+          <div id="practiceLive" class="empty"><b>Belum ada sesi aktif</b>Practice mulai otomatis ketika decoder membaca lintasan.</div>
+        </div>
+        <div>
+          <div class="side-card"><h3>Sinkronisasi</h3><div class="note">Practice dikirim otomatis per beberapa detik saat online. Privasi diatur oleh pemilik akun dari dashboard website.</div></div>
+          <div class="side-card"><h3>Riwayat practice</h3><div id="practiceHistory" class="note">Belum ada sesi.</div></div>
+        </div>
+      </div>
+    </div>
+
     <!-- ==================== HISTORY RACE ==================== -->
     <div class="page" id="view-history" style="display:none">
       <div class="head">
@@ -551,7 +574,7 @@
             <div class="kv"><span>Belum diunggah</span><b id="rBelum" style="color:#8a6a12">0</b></div>
             <div class="kv"><span>Sudah diunggah</span><b id="rSent" style="color:#0b7a45">0</b></div>
             <div class="kv"><span>Total lap tercatat</span><b id="rLap">0</b></div>
-            <div class="note" style="margin-top:9px">Unggahan hanya lewat tombol — tidak ada pengiriman otomatis.</div>
+            <div class="note" style="margin-top:9px">Hasil race otomatis masuk antrean dan dikirim saat akun online. Tombol unggah hanya untuk memicu percobaan ulang sekarang.</div>
           </div>
           <div class="side-card">
             <h3>Sesi terpilih <span id="histSel">—</span></h3>
@@ -802,13 +825,17 @@
       <input id="trkName" placeholder="Contoh: Sirkuit Medan RC · Layout C"></div>
     <div class="field"><label>Alamat / lokasi</label>
       <input id="trkAddr" placeholder="Contoh: Jl. Gatot Subroto, Medan"></div>
-    <div class="two">
+      <div class="two">
       <div class="field"><label>Lebar loop (meter)</label>
         <input id="trkWidth" type="number" step="0.01" min="0.01" placeholder="0.30">
         <div class="hint">Jarak antarkabel loop dalam meter, searah gerak mobil; bukan panjang track.</div></div>
+      <div class="field"><label>Minimum waktu lap (detik)</label>
+        <input id="trkMinLap" type="number" step="0.1" min="0.1" placeholder="1.5">
+        <div class="hint">Passing transponder yang sama sebelum waktu ini akan diabaikan di Quick Race dan Practice.</div></div>
+      </div>
       <div class="field"><label>Catatan layout</label>
         <input id="trkNote" placeholder="4 tikungan, aspal"></div>
-    </div>
+    <label class="check" style="margin-top:10px"><input id="trkActive" type="checkbox"> Jadikan track aktif untuk decoder, Quick Race, dan Practice</label>
     <div class="field" style="margin-bottom:0">
       <label>Perkiraan</label>
       <div class="note" id="trkHitung">Isi lebar loop untuk melihat contoh kecepatan.</div>

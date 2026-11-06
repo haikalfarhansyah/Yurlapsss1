@@ -94,7 +94,8 @@ class AppContext:
         self.updater = None
         self.update_pending = False
         from .practice import PracticeRecorder
-        self.practice = PracticeRecorder()
+        self.practice = PracticeRecorder(on_close=self._persist_practice)
+        self._last_practice_persist = 0.0
         self.start_time = time.time()
         previous_event = engine.on_event
         def route_event(event):
@@ -103,6 +104,7 @@ class AppContext:
             if event.get("kind") == "passing":
                 if self.race.status == "idle":
                     self.practice.record(event.get("transponder_id"), event.get("decoder_timecode"))
+                    self._maybe_persist_practice()
                 self.race.catat(event["transponder_id"],
                                 decoder_ts=event.get("decoder_timecode"),
                                 rssi=event.get("rssi"), hit_count=event.get("hit_count"),
@@ -114,6 +116,39 @@ class AppContext:
             if previous_event:
                 previous_event(event)
         engine.on_event = route_event
+
+    def _maybe_persist_practice(self) -> None:
+        """Checkpoint an active practice session for periodic cloud upload."""
+        now = time.time()
+        if now - self._last_practice_persist < 15:
+            return
+        snap = self.practice.snapshot().get("session")
+        if not snap or not any(snap.get("laps", {}).values()):
+            return
+        self._last_practice_persist = now
+        self._persist_practice(snap)
+
+    def _persist_practice(self, session: dict) -> None:
+        """Save idle practice locally with stable driver/transponder identity."""
+        try:
+            drivers = []
+            for transponder, laps in (session.get("laps") or {}).items():
+                member = self.club.member_for_transponder(transponder) or {}
+                drivers.append({
+                    "transponder": int(transponder),
+                    "driver_id": member.get("id"),
+                    "driver": member.get("name") or f"TP {transponder}",
+                    "nickname": member.get("nick") or "",
+                    "class": member.get("kelas") or "",
+                    "laps_ms": list(laps or []),
+                    "best_ms": min(laps) if laps else None,
+                })
+            session = dict(session, drivers=drivers, schema_version=1)
+            self.club.simpan_practice(session)
+            if self._cloud is not None:
+                self._cloud.wake.set()
+        except Exception as exc:
+            self.engine.log("warning", f"Practice lokal gagal disimpan: {exc}")
 
     @property
     def club(self):
@@ -285,6 +320,8 @@ def make_handler(ctx: AppContext):
                         ctx.decoder_manager.find_decoder() is not None)
                 if ctx.updater is not None:
                     snap["update"] = ctx.updater.info()
+                ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                snap["practice"] = ctx.practice.snapshot()
                 # nilai yang dipakai halaman Decoder (jangan menebak di UI)
                 names = {tp: m.get("nick") or m["name"] for m in ctx.club.members()
                          if m.get("status") == "active" for tp in m["transponder"]}
@@ -340,6 +377,7 @@ def make_handler(ctx: AppContext):
                     "presets": ctx.club.presets(),
                     "ringkasan": ctx.club.ringkasan(),
                     "race": ctx.race.snapshot(),
+                    "practice": ctx.practice.snapshot(),
                 })
 
             if path == "/api/tracks":
@@ -357,7 +395,11 @@ def make_handler(ctx: AppContext):
 
             if path == "/api/practice/state":
                 ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                ctx._maybe_persist_practice()
                 return self._json({"ok": True, "practice": ctx.practice.snapshot()})
+
+            if path == "/api/practice/history":
+                return self._json({"ok": True, "sessions": ctx.club.practice_sessions()})
 
             if path == "/api/races":
                 tid = (qs.get("track_id") or [None])[0]
@@ -551,6 +593,7 @@ def make_handler(ctx: AppContext):
                         if ctx.update_pending:
                             return self._err(409, "Pembaruan sedang dipasang")
                         snap = ctx.race.mulai()
+                        ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "race": snap})
@@ -568,23 +611,23 @@ def make_handler(ctx: AppContext):
             if path == "/api/race/finish":
                 try:
                     snap = ctx.race.selesai(data.get("alasan") or "dihentikan operator")
+                    ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "race": snap})
 
             if path == "/api/race/reset":
-                return self._json({"ok": True, "race": ctx.race.reset()})
+                snap = ctx.race.reset()
+                ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                return self._json({"ok": True, "race": snap})
 
             if path == "/api/practice/visibility":
-                try:
-                    ctx.practice.set_visibility(data.get("visibility"))
-                except ValueError as exc:
-                    return self._err(400, str(exc))
-                return self._json({"ok": True, "practice": ctx.practice.snapshot()})
+                return self._err(409, "Privasi practice diatur dari dashboard website pemilik akun")
 
             if path == "/api/race/save":
                 try:
                     info = ctx.race.simpan(data.get("nama"))
+                    ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
                     ctx.cloud.wake.set()
                 except ValueError as e:
                     return self._err(400, str(e))
@@ -610,6 +653,8 @@ def make_handler(ctx: AppContext):
             if path == "/api/track":
                 try:
                     t = ctx.club.save_track(data)
+                    if t.get("active"):
+                        ctx.race.set_track(t["id"])
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "track": t, "tracks": ctx.club.tracks()})

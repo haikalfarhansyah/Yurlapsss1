@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from app.club import ClubStore
-from app.race_upload import UploadError, remote_race_id, upload_pending
+from app.race_upload import UploadError, remote_race_id, upload_pending, practice_payload
 
 CLUB = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 OTHER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -71,6 +71,19 @@ class RaceUploadTest(unittest.TestCase):
         with self.assertRaises(UploadError):
             upload_pending(self.store, CLUB, USER, client)
         self.assertEqual(self.store.race("r1")["sync"], "belum")
+
+    def test_practice_payload_preserves_driver_account_and_privacy(self):
+        session = {"id": "practice-1", "track_id": "track-1", "track_name": "A",
+                   "started_at": 100, "ended_at": 200, "visibility": "private"}
+        driver = {"driver_id": USER, "transponder": 42, "driver": "Budi",
+                  "nickname": "Budi", "class": "Mod", "laps_ms": [1000, 1100],
+                  "best_ms": 1000}
+        payload = practice_payload(session, CLUB, USER, driver)
+        self.assertEqual(payload["user_id"], USER)
+        self.assertEqual(payload["visibility"], "private")
+        self.assertEqual(payload["laps"][0]["lap_ms"], [1000, 1100])
+        payload = practice_payload(session, CLUB, USER, dict(driver, driver_id="u-local"))
+        self.assertIsNone(payload["user_id"])
 
 
 if __name__ == "__main__":

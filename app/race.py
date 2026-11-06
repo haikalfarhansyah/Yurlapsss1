@@ -47,10 +47,14 @@ class RaceEngine:
         self.mulai_mono = 0.0
         self.mulai_wall = 0.0
         self.akhir_wall: Optional[float] = None
-        self.cfg = dict(store.preset(store.presets()[0]["id"]) or {})
+        presets = store.presets()
+        self.cfg = dict(store.preset(presets[0]["id"]) or {}) if presets else {"nama": "Quick Race", "target": "time", "value": 180, "rank": "lapsTime", "start_mode": "grid", "cd": 5, "sound": 1}
         self.cfg.pop("updated_at", None)
         self.cfg["nama"] = self.cfg.pop("name", "Quick Race")
-        self.track_id = (store.tracks() or [{}])[0].get("id")
+        tracks = store.tracks()
+        active = next((track for track in tracks if track.get("active")), None)
+        self.track_id = (active or (tracks or [{}])[0]).get("id")
+        self.cfg["min_lap_ms"] = int((active or (tracks or [{}])[0]).get("min_lap_ms") or 1500)
         self.peserta: list[dict] = []
         self.log: list[dict] = []
         self.pilihan: Optional[str] = None
@@ -107,6 +111,7 @@ class RaceEngine:
             if not self.store.track(track_id):
                 raise ValueError("Track tidak ditemukan")
             self.track_id = track_id
+            self.cfg["min_lap_ms"] = int(self.store.track(track_id).get("min_lap_ms") or 1500)
 
     def set_peserta(self, daftar: list[dict]) -> list[dict]:
         """Ganti daftar peserta. Ditolak kalau sesi sedang berjalan."""
@@ -162,6 +167,7 @@ class RaceEngine:
             if self.status == "live":
                 raise ValueError("Sesi sedang berjalan")
             self._track_snapshot = dict(self.store.track(self.track_id) or {})
+            self.cfg["min_lap_ms"] = int(self._track_snapshot.get("min_lap_ms") or 1500)
             for p in self.peserta:
                 p["laps"] = []
                 p["dur_us"] = None

@@ -21,7 +21,7 @@ from .club import ClubStore
 from .cloud_credentials import CredentialStore
 from .cloud_entities import sync_entities, conflicts
 from .member_sync import _read_all, refresh_members
-from .race_upload import SupabaseRaceClient, UploadError, upload_pending
+from .race_upload import SupabaseRaceClient, UploadError, upload_pending, upload_pending_practice
 
 DEFAULT_URL = "https://eottbwdcxrhgxadwnlmy.supabase.co"
 # Publishable client key only; authorization is enforced by the user's JWT + RLS.
@@ -125,6 +125,8 @@ class CloudService:
                     with store._conn:
                         store._conn.execute("DELETE FROM track WHERE id='t-local'")
                 store.set_club(club_id=selected["id"], name=selected["name"], role="leader")
+                if fresh:
+                    self._migrate_unassigned_local_history(store, selected["id"])
             finally:
                 store.close()
             self.on_switch(path)  # can reject if a race is still running/unsaved
@@ -136,6 +138,30 @@ class CloudService:
                 self._save()
             self.last_error = None
             self.wake.set()
+
+    def _migrate_unassigned_local_history(self, target: ClubStore, club_id: str) -> None:
+        """Attach offline results made before login to the selected club.
+
+        A logged-out computer cannot know the remote club UUID. Once the user
+        explicitly signs in and selects a club, unassigned local history is
+        copied into that club cache and enters the normal upload queue.
+        """
+        local_path = self.root / "yurlaps_club.sqlite3"
+        if not local_path.exists() or local_path.resolve() == target.path.resolve():
+            return
+        local = ClubStore(local_path)
+        try:
+            for row in local._conn.execute(
+                "SELECT id FROM race WHERE club_id IS NULL OR club_id = '' OR club_id = 'club-local'"
+            ).fetchall():
+                race = local.race(row["id"])
+                if race:
+                    target.simpan_race(dict(race, club_id=club_id, sync="belum"))
+            for session in local.practice_sessions(1000):
+                if session.get("club_id") in (None, "", "club-local"):
+                    target.simpan_practice(session, club_id=club_id)
+        finally:
+            local.close()
 
     def select_club(self, club_id):
         with self.operation:
@@ -206,6 +232,7 @@ class CloudService:
                     try:
                         # Upload independently: a metadata conflict never blocks race results.
                         upload_pending(store, club["id"], self.state["user_id"], client)
+                        upload_pending_practice(store, club["id"], self.state["user_id"], client)
                         if self.can_refresh(path):
                             refresh_members(store, club["id"], client)
                             sync_entities(store, club["id"], client)
@@ -232,7 +259,8 @@ class CloudService:
         while not self.stopped.is_set():
             self.wake.clear()
             self.sync_once()
-            self.wake.wait(30)
+            # Practice checkpoints are uploaded promptly while online.
+            self.wake.wait(15)
 
     def stop(self):
         self.stopped.set()
