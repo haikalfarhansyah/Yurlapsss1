@@ -93,10 +93,16 @@ class AppContext:
         self.decoder_manager = None
         self.updater = None
         self.update_pending = False
+        from .practice import PracticeRecorder
+        self.practice = PracticeRecorder()
         self.start_time = time.time()
         previous_event = engine.on_event
         def route_event(event):
+            # Practice is automatic while Quick Race is idle.
+            self.practice.tick(race_status=self.race.status, track=self.race._track())
             if event.get("kind") == "passing":
+                if self.race.status == "idle":
+                    self.practice.record(event.get("transponder_id"), event.get("decoder_timecode"))
                 self.race.catat(event["transponder_id"],
                                 decoder_ts=event.get("decoder_timecode"),
                                 rssi=event.get("rssi"), hit_count=event.get("hit_count"),
@@ -349,6 +355,10 @@ def make_handler(ctx: AppContext):
                 ctx.race.cek_waktu()
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
+            if path == "/api/practice/state":
+                ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                return self._json({"ok": True, "practice": ctx.practice.snapshot()})
+
             if path == "/api/races":
                 tid = (qs.get("track_id") or [None])[0]
                 return self._json({"ok": True, "races": ctx.club.races(tid)})
@@ -564,6 +574,13 @@ def make_handler(ctx: AppContext):
 
             if path == "/api/race/reset":
                 return self._json({"ok": True, "race": ctx.race.reset()})
+
+            if path == "/api/practice/visibility":
+                try:
+                    ctx.practice.set_visibility(data.get("visibility"))
+                except ValueError as exc:
+                    return self._err(400, str(exc))
+                return self._json({"ok": True, "practice": ctx.practice.snapshot()})
 
             if path == "/api/race/save":
                 try:
