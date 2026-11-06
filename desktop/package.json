@@ -67,10 +67,8 @@
     },
     "publish": [
       {
-        "provider": "github",
-        "owner": "Khasya207",
-        "repo": "Yurlapsss",
-        "releaseType": "draft"
+        "provider": "generic",
+        "url": "https://yurlaps.dpdns.org/releases/"
       }
     ]
   },

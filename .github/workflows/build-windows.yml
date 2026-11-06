@@ -14,7 +14,7 @@ on:
         default: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-${{ github.workflow }}-${{ github.ref }}
@@ -400,6 +400,21 @@ jobs:
         working-directory: ${{ steps.detect.outputs.root }}
         run: python tools/buat_update_manifest.py --dir dist-electron
 
+      - name: Publikasikan rilis ke website YurLaps
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ${{ steps.detect.outputs.root }}
+        shell: pwsh
+        env:
+          YURLAPS_SUPABASE_URL: ${{ secrets.YURLAPS_SUPABASE_URL }}
+          YURLAPS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.YURLAPS_SUPABASE_SERVICE_ROLE_KEY }}
+          YURLAPS_RELEASE_BUCKET: yurlaps-releases
+          YURLAPS_RELEASE_DIR: dist-electron
+          YURLAPS_RELEASE_VERSION: ${{ github.ref_name }}
+          YURLAPS_RELEASE_NOTES: ${{ github.event.head_commit.message }}
+        run: |
+          $env:YURLAPS_RELEASE_VERSION = $env:YURLAPS_RELEASE_VERSION.TrimStart('v')
+          node tools/publish_release.mjs
+
       - name: Ringkasan artefak
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
@@ -428,22 +443,3 @@ jobs:
             ${{ steps.detect.outputs.root }}/vendor/openstint/upstream-commit.txt
           if-no-files-found: error
 
-  publish-release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v5
-        with:
-          name: YurLaps-Windows
-          path: release
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          prerelease: false
-          files: |
-            release/**/*.exe
-            release/**/*.zip
-            release/**/*.yml
-            release/**/*-full.exe

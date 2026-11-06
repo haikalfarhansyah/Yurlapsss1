@@ -444,7 +444,8 @@ lintasan mana yang rawan hilang. Semua kolom ini juga tersimpan di database
 
 ## 7. Pembaruan aplikasi (update)
 
-Pada Windows versi Electron, menu **Pembaruan** memakai GitHub Releases. Aplikasi
+Pada Windows versi Electron, menu **Pembaruan** memakai endpoint rilis resmi
+website YurLaps (`https://yurlaps.dpdns.org/releases/`). Aplikasi
 memeriksa rilis stabil terbaru, mengunduh paket melalui `electron-updater`, lalu
 memasang update setelah race disimpan. Aplikasi ditutup dan dibuka kembali selama
 file program diganti; pengguna tidak perlu uninstall. Data `%APPDATA%\\YurLaps`
