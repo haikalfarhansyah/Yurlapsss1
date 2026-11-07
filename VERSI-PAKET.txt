@@ -1,7 +1,7 @@
 PENANDA VERSI PAKET — YurLaps
 =============================
 
-PAKET       : 0.4.1 (Electron)
+PAKET       : 0.4.2 (Electron)
 DIBUAT      : 2026-11-07
 PATCH       : tanpa-hook-nsis
 PATCH2      : satu-repo-decoder
@@ -41,10 +41,10 @@ Yang sudah diperbaiki di paket ini
 
 Cara cepat memeriksa zip yang kamu punya
 ----------------------------------------
-  unzip -l yurlaps-0.4.1-full.zip | grep installer-hooks
+  unzip -l yurlaps-0.4.2-full.zip | grep installer-hooks
       -> harus KOSONG (tidak ada hasil)
 
-  unzip -p yurlaps-0.4.1-full.zip desktop/package.json | grep include
+  unzip -p yurlaps-0.4.2-full.zip desktop/package.json | grep include
       -> harus KOSONG (tidak ada hasil)
 
 Kalau salah satu memunculkan hasil, itu paket lama.
