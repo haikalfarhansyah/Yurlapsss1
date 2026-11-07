@@ -91,8 +91,12 @@ def main():
         html = r.read().decode()
     check("YurLaps" in html and 'id="view-quickrace"' in html, "UI Quick Race tersaji di /")
     with urllib.request.urlopen(base + "/practice", timeout=5) as r:
-        html_lama = r.read().decode()
-    check("YurLaps" in html_lama and "EventSource" in html_lama, "UI lama tersaji di /practice")
+        html_practice = r.read().decode()
+    # /practice is now an alias for the production shell. The old standalone
+    # legacy page was intentionally removed so users always get the full
+    # Practice, Quick Race, Track, Decoder, and Sound menus.
+    check("YurLaps" in html_practice and 'id="view-practice"' in html_practice,
+          "UI Practice produksi tersaji di /practice")
 
     # --- simulasi lap nyata lewat ZMQ + SSE ------------------------------
     cfg.port = port
