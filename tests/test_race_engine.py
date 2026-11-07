@@ -71,10 +71,9 @@ class OfflineRaceTests(unittest.TestCase):
         self.assertEqual(self.race.peserta[0]['laps'],[])
         self.assertIn('restart',self.race.alasan_selesai)
 
-    def test_go_requires_fresh_decoder_status(self):
-        with self.assertRaises(ValueError):self.race.mulai()
-        self.status(10000);self.race.decoder_received_mono-=5
-        with self.assertRaises(ValueError):self.race.mulai()
+    def test_race_can_start_without_decoder_status(self):
+        self.race.mulai()
+        self.assertEqual(self.race.status, 'live')
 
     def test_speed_is_passing_duration_and_cable_spacing(self):
         self.assertEqual(kmh(.3,90000),12)
@@ -219,18 +218,17 @@ class OfflineRaceTests(unittest.TestCase):
             self.assertEqual(self.race.status,'live')
         self.assertEqual([e['value'] for e in self.race.events if e['kind']=='countdown'],[3,2,1])
 
-    def test_pause_after_five_seconds_requires_fresh_baseline_on_resume(self):
+    def test_decoder_gap_does_not_pause_race(self):
         self.go();self.passing(11000);self.passing(21000)
         seen=self.race.decoder_received_mono
         with patch('app.race.time.monotonic',return_value=seen+4.9):
             self.race.cek_waktu();self.assertEqual(self.race.status,'live')
         with patch('app.race.time.monotonic',return_value=seen+5):
-            self.race.cek_waktu();self.assertEqual(self.race.status,'paused')
-            self.race.observe_clock(40000);self.race.resume()
-            self.race.catat(11,decoder_ts=41000)
-            self.race.catat(11,decoder_ts=51000)
-        self.assertEqual(self.race.peserta[0]['laps'],[10000,10000])
-        self.assertTrue(self.race.timing_interrupted)
+            self.race.cek_waktu();self.assertEqual(self.race.status,'live')
+        self.race.observe_clock(40000)
+        self.race.catat(11,decoder_ts=41000)
+        self.race.catat(11,decoder_ts=51000)
+        self.assertEqual(self.race.peserta[0]['laps'],[10000,20000,10000])
 
     def test_older_status_than_last_passing_is_not_a_decoder_restart(self):
         self.go();self.passing(11000)

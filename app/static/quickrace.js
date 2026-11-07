@@ -440,14 +440,14 @@ function renderTombol(){
   $('btnStart').style.display=st==='idle'?'':'none';
   $('btnStart').innerHTML=SVG_PLAY+' Start';
   $('btnResume').style.display=paused&&sesi.start_decoder_ts!=null?'':'none';
-  $('btnResume').disabled=!!sesi?.clock_stale;
+  $('btnResume').disabled=false;
   $('btnReset').style.display=sesi?.can_reset?'':'none';
   $('btnFinish').style.display=['live','countdown','paused'].includes(st)?'':'none';
   $('btnFinish').disabled=!['live','countdown','paused'].includes(st);
   $('btnReview').style.display=unresolved?'':'none';
   ['btnPeserta','selTrack','selPreset','gearBtnTop','accountClub','btnTrackAdd'].forEach(id=>$(id).disabled=locked);
   $('menuLogout').disabled=locked;
-  $('qrLead').textContent=paused?'Timing terganggu. Sambungkan decoder, lalu pilih lanjutkan atau akhiri sesi.'
+  $('qrLead').textContent=paused?'Timing dilanjutkan tanpa menunggu status decoder.'
     :st==='live'?'Sesi berjalan. Lap tercatat dari decoder.'
     :st==='countdown'?'Countdown berjalan. Leaderboard tetap terlihat.'
     :st==='done'?sesi.can_reset?(sesi.saved_id?'Sesi tersimpan.':'Sesi dibuang.')+' Tekan Reset untuk menyiapkan race berikutnya.':'Sesi selesai. Pilih Simpan / buang sesi sebelum Reset.'
@@ -1188,7 +1188,7 @@ async function refreshAccount(){
   try{ const r=await api('/api/cloud/status'); accountData=r.cloud||{}; renderAccount(); }
   catch(e){ /* account status unavailable while local server starts */ }
 }
-$('btnAkun').onclick=e=>{e.stopPropagation();if(!accountData.user_id){$('modalLogin').hidden=false;$('loginEmail').focus();return;}const m=$('accountMenu');m.hidden=!m.hidden;renderAccount();};
+$('btnAkun').onclick=e=>{e.stopPropagation();if(!accountData.user_id){$('menuLogin').click();return;}const m=$('accountMenu');m.hidden=!m.hidden;renderAccount();};
 $('menuLogin').onclick=async()=>{
   $('accountMenu').hidden=true;
   // CAPTCHA belongs to the website. Always hand off login to the default browser.

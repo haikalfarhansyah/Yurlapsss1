@@ -153,17 +153,7 @@ class RaceEngine:
             return out
 
     def _pause_if_stale(self, now):
-        # A decoder gap must not freeze the countdown before GO. The race is
-        # paused only after it has actually started; GO then creates a clear
-        # timing boundary and missing crossings are never fabricated.
-        if self.status == "live" and now - self.decoder_received_mono >= 5:
-            self.status = "paused"
-            self.timing_interrupted = True
-            self.interrupted_at = now
-            self._paused_decoder_ts = self.decoder_ts
-            self.alasan_selesai = "Timing terganggu: decoder tidak mengirim data selama 5 detik"
-            self._event("paused", message=self.alasan_selesai)
-            return True
+        # Decoder availability is advisory; missing passings remain missing.
         return False
 
     def observe_clock(self, timestamp):
@@ -173,7 +163,14 @@ class RaceEngine:
             now = time.monotonic()
             self._pause_if_stale(now)
             if self._last_clock_ts is not None and timestamp < self._last_clock_ts:
-                self.clock_reset()
+                self.timing_interrupted = True
+                self._event("decoder_reset", message="Decoder restart; timing baseline direset")
+                if self.status in ("countdown", "live"):
+                    self.start_decoder_ts = timestamp
+                for driver in self.peserta:
+                    if driver.get("finish_decoder_ts") is None:
+                        driver["last_decoder_ts"] = None
+                        driver["needs_baseline"] = True
             self._last_clock_ts = timestamp
             self.decoder_ts = max(timestamp, self.decoder_ts if self.decoder_ts is not None else timestamp)
             self.decoder_received_mono = now
@@ -182,7 +179,13 @@ class RaceEngine:
         with self.lock:
             if self.status in ("live", "countdown", "paused"):
                 self.timing_interrupted = True
-                self._selesai("Timing terganggu: decoder restart. Simpan atau buang, lalu mulai sesi baru.")
+                if self.decoder_ts is not None:
+                    self.start_decoder_ts = self.decoder_ts
+                for driver in self.peserta:
+                    if driver.get("finish_decoder_ts") is None:
+                        driver["last_decoder_ts"] = None
+                        driver["needs_baseline"] = True
+                self._event("decoder_reset", message="Decoder restart; sesi tetap berjalan dengan baseline baru")
             self.decoder_ts = None
             self._last_clock_ts = None
             self.decoder_received_mono = 0.0
@@ -191,11 +194,19 @@ class RaceEngine:
         with self.lock:
             if self.status != "paused" or self.start_decoder_ts is None:
                 raise ValueError("Sesi ini tidak dapat dilanjutkan; simpan atau buang lalu mulai ulang")
-            if self.decoder_ts is None or time.monotonic() - self.decoder_received_mono > 3:
-                raise ValueError("Tunggu sambungan decoder kembali aktif")
             pause_ts = self._paused_decoder_ts
-            if pause_ts is None or self.decoder_ts < pause_ts:
-                raise ValueError("Jam decoder berubah; mulai sesi baru")
+            if pause_ts is None or self.decoder_ts is None:
+                self.status = "live"
+                self.interrupted_at = None
+                self._event("resume")
+                return self.snapshot()
+            if self.decoder_ts < pause_ts:
+                self.start_decoder_ts = self.decoder_ts
+                self._paused_decoder_ts = self.decoder_ts
+                self.status = "live"
+                self.interrupted_at = None
+                self._event("resume")
+                return self.snapshot()
             # Exclude the disconnected interval from all deadlines. The first
             # later crossing is a new baseline, never a lap across the gap.
             shift = self.decoder_ts - pause_ts
@@ -219,8 +230,6 @@ class RaceEngine:
                 raise ValueError("Buat dan aktifkan track sebelum memulai race")
             if not any(p["transponder"] is not None for p in self.peserta):
                 raise ValueError("Pilih peserta dengan ID transponder terlebih dahulu")
-            if self.decoder_ts is None or time.monotonic() - self.decoder_received_mono > 3:
-                raise ValueError("Tunggu YurLaps Decoder terhubung sebelum memulai race")
             self._clear_session()
             self._track_snapshot = dict(track)
             self.race_track = dict(track)
