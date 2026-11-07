@@ -11,7 +11,10 @@ KINDS = {
                              "loop_width_m": "loop_width_m", "note": "note", "best_ms": "best_ms", "holder": "holder",
                              "min_lap_ms": "min_lap_ms", "active": "is_active"}),
     "preset": ("club_presets", {"name": "name", "target": "target", "value": "value",
-                                "rank": "rank", "start_mode": "start_mode", "cd": "cd", "sound": "sound"}),
+                                "rank": "rank", "start_mode": "start_mode", "cd": "cd", "sound": "sound",
+                                "random_delay_max": "random_delay_max", "target_time_ms": "target_time_ms",
+                                "finish_current_lap": "finish_current_lap", "stagger_mode": "stagger_mode",
+                                "stagger_gap_ms": "stagger_gap_ms"}),
 }
 
 
@@ -26,6 +29,8 @@ def _data(row, kind):
     data = {remote: row.get(local) for local, remote in KINDS[kind][1].items()}
     if kind == "track":
         data["is_active"] = bool(row.get("active"))
+    else:
+        data["finish_current_lap"] = bool(row.get("finish_current_lap"))
     return data
 
 

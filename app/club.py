@@ -31,7 +31,7 @@ from typing import Optional
 
 from .config import default_data_dir
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -68,7 +68,14 @@ CREATE TABLE IF NOT EXISTS member (
     role        TEXT DEFAULT 'member',
     status      TEXT DEFAULT 'active',
     transponder TEXT,                 -- JSON array nomor transponder
+    tts_name    TEXT,
+    avatar_url  TEXT,
     updated_at  REAL
+);
+
+CREATE TABLE IF NOT EXISTS observed_transponder (
+    transponder TEXT PRIMARY KEY,
+    observed_at REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS preset (
@@ -80,6 +87,11 @@ CREATE TABLE IF NOT EXISTS preset (
     start_mode  TEXT DEFAULT 'grid',
     cd          INTEGER DEFAULT 5,
     sound       INTEGER DEFAULT 1,
+    random_delay_max INTEGER NOT NULL DEFAULT 1,
+    target_time_ms INTEGER,
+    finish_current_lap INTEGER NOT NULL DEFAULT 0,
+    stagger_mode TEXT NOT NULL DEFAULT 'manual',
+    stagger_gap_ms INTEGER NOT NULL DEFAULT 10000,
     updated_at  REAL
 );
 
@@ -138,32 +150,13 @@ CREATE TABLE IF NOT EXISTS practice_session (
 
 CREATE INDEX IF NOT EXISTS idx_lap_race ON race_lap (race_id, transponder);
 CREATE INDEX IF NOT EXISTS idx_rd_race  ON race_driver (race_id);
+CREATE TABLE IF NOT EXISTS race_deletion (
+    id TEXT PRIMARY KEY,
+    club_id TEXT NOT NULL,
+    remote_id TEXT,
+    deleted_at REAL NOT NULL
+);
 """
-
-# Data contoh supaya aplikasi bisa langsung dipakai tanpa koneksi.
-CONTOH_TRACK = [
-    ("t-medan-a", "Sirkuit Medan RC · Layout A", "Jl. Gatot Subroto, Medan", 42.0,
-     "4 tikungan, aspal", 9402, "Budi", 1),
-    ("t-medan-b", "Sirkuit Medan RC · Layout B", "Jl. Gatot Subroto, Medan", 58.0,
-     "6 tikungan, aspal", 12118, "Andi", 1),
-    ("t-deli-oval", "Lapangan Deli Serdang · Oval", "Lubuk Pakam, Deli Serdang", 35.0,
-     "oval, beton", 7880, "Citra", 0),
-]
-
-CONTOH_MEMBER = [
-    ("u-budi", "Budi Santoso", "Budi", "Mod", "Xray X4", "leader", "active", [1615544]),
-    ("u-andi", "Andi Pratama", "Andi", "Stock", "Tamiya", "co_leader", "active", [1712003, 1712004]),
-    ("u-citra", "Citra Dewi", "Citra", "Mod", "Yokomo", "member", "active", [1810044]),
-    ("u-rudi", "Rudi Hartono", "Rudi", "Stock", "Tamiya", "officer", "active", [1912007]),
-    ("u-sari", "Sari Wulandari", "Sari", "Mod", "—", "member", "pending", []),
-]
-
-CONTOH_PRESET = [
-    ("p-sprint", "Sprint 3 menit", "time", 180, "lapsTime", "grid", 5, 1),
-    ("p-final", "Final 5 menit · 10 lap", "laps", 10, "best", "grid", 5, 1),
-    ("p-endurance", "Endurance 10 menit", "time", 600, "top3", "staggered", 10, 1),
-]
-
 
 def locked(method):
     @functools.wraps(method)
@@ -215,13 +208,17 @@ class ClubStore:
                           "mutation_id": "TEXT", "deleted": "INTEGER DEFAULT 0", "sync_error": "TEXT"},
                 "race": {"club_id": "TEXT", "result_json": "TEXT"},
                 "preset": {"remote_revision": "INTEGER DEFAULT 0", "mutation_id": "TEXT",
-                           "deleted": "INTEGER DEFAULT 0", "sync_error": "TEXT", "synced": "INTEGER DEFAULT 0"},
-                "member": {"source": "TEXT DEFAULT 'local'", "tts_name": "TEXT",
+                           "deleted": "INTEGER DEFAULT 0", "sync_error": "TEXT", "synced": "INTEGER DEFAULT 0",
+                           "random_delay_max": "INTEGER NOT NULL DEFAULT 1", "target_time_ms": "INTEGER",
+                           "finish_current_lap": "INTEGER NOT NULL DEFAULT 0", "stagger_mode": "TEXT NOT NULL DEFAULT 'manual'",
+                           "stagger_gap_ms": "INTEGER NOT NULL DEFAULT 10000"},
+                "member": {"source": "TEXT DEFAULT 'local'", "tts_name": "TEXT", "avatar_url": "TEXT",
                            "transponder_details": "TEXT DEFAULT '[]'"},
                 "practice_session": {"club_id": "TEXT", "track_id": "TEXT",
                            "track_name": "TEXT NOT NULL DEFAULT ''", "started_at": "REAL",
                            "ended_at": "REAL", "visibility": "TEXT NOT NULL DEFAULT 'private'",
-                           "sync": "TEXT NOT NULL DEFAULT 'belum'", "result_json": "TEXT NOT NULL DEFAULT '{}'"},
+                           "sync": "TEXT NOT NULL DEFAULT 'belum'", "result_json": "TEXT NOT NULL DEFAULT '{}'",
+                           "revision": "INTEGER NOT NULL DEFAULT 1"},
             }
             for table, columns in additions.items():
                 present = {r[1] for r in conn.execute("PRAGMA table_info(" + table + ")")}
@@ -243,20 +240,16 @@ class ClubStore:
 
     @locked
     def _seed(self) -> None:
-        """Isi data contoh hanya bila tabel masih kosong (sekali saja)."""
+        """Initialize only the local club metadata.
+
+        Tracks, members, and presets are real user data and must never be
+        fabricated on first launch. A blank local club row keeps the offline
+        store usable until the operator signs in or creates a track.
+        """
         c = self._conn
-        now = time.time()
         if not c.execute("SELECT 1 FROM club WHERE id = 1").fetchone():
             c.execute("INSERT INTO club (id, club_id, name, role, synced_at) "
-                      "VALUES (1, 'club-local', 'Club lokal', 'leader', NULL)")
-        if self.club().get("club_id") in (None, "club-local") and not c.execute("SELECT 1 FROM track LIMIT 1").fetchone():
-            c.execute("INSERT INTO track (id,name,synced,updated_at,min_lap_ms,active) VALUES (?,?,0,?,?,1)",
-                      ("t-local", "Track lokal", now, 1500))
-        if not c.execute("SELECT 1 FROM preset LIMIT 1").fetchone():
-            for pid, name, target, value, rank, start, cd, sound in CONTOH_PRESET:
-                c.execute("INSERT INTO preset (id, name, target, value, rank, start_mode,"
-                          " cd, sound, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                          (pid, name, target, value, rank, start, cd, sound, now))
+                      "VALUES (1, NULL, 'Belum terhubung', 'operator', NULL)")
         c.commit()
 
     # -- club ------------------------------------------------------------
@@ -353,8 +346,6 @@ class ClubStore:
 
     @locked
     def delete_track(self, track_id: str) -> bool:
-        if self._conn.execute("SELECT COUNT(*) FROM track WHERE deleted=0").fetchone()[0] <= 1:
-            raise ValueError("Minimal satu track harus ada")
         was_active = self._conn.execute("SELECT active FROM track WHERE id=?", (track_id,)).fetchone()
         cur = self._conn.execute("UPDATE track SET deleted=1, active=0, synced=0, mutation_id=?, "
                                  "sync_error=NULL WHERE id=?", (str(uuid.uuid4()), track_id))
@@ -383,8 +374,19 @@ class ClubStore:
 
     # -- member ----------------------------------------------------------
     def member_for_transponder(self, transponder):
-        return next((m for m in self.members() if m.get("status") == "active"
+        return next((m for m in sorted(self.members(), key=lambda m: 0 if m.get("source") in ("cloud", "guest") else 1) if m.get("status") == "active"
                      and str(transponder) in {str(t) for t in m.get("transponder", [])}), None)
+
+    def observe_transponder(self, transponder):
+        self._conn.execute("INSERT INTO observed_transponder(transponder,observed_at) VALUES (?,?) "
+                           "ON CONFLICT(transponder) DO UPDATE SET observed_at=excluded.observed_at",
+                           (str(int(transponder)), time.time()))
+        self._conn.commit()
+
+    def observed_transponders(self):
+        return [row[0] for row in self._conn.execute(
+            "SELECT transponder FROM observed_transponder WHERE observed_at>? ORDER BY observed_at DESC LIMIT 100",
+            (time.time()-86400,))]
 
     def save_member(self, data, *, _commit=True, _source=None):
         with self.lock:
@@ -406,17 +408,20 @@ class ClubStore:
                 if m["id"] != mid and set(m["transponder"]) & set(ids):
                     raise ValueError("Transponder sudah terdaftar pada " + m["name"])
             old = next((m for m in members if m["id"] == mid), {})
-            if old.get("source") == "cloud":
+            if old.get("source") in ("cloud", "guest"):
                 raise ValueError("Modifikasi member akun dan transponder melalui website")
             source = old.get("source") or _source or "local"
             self._conn.execute(
-                "INSERT INTO member (id,name,nick,kelas,mobil,role,status,transponder,updated_at,source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+                "INSERT INTO member (id,name,nick,kelas,mobil,role,status,transponder,updated_at,source,tts_name,avatar_url) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
                 "name=excluded.name,nick=excluded.nick,kelas=excluded.kelas,mobil=excluded.mobil,"
-                "transponder=excluded.transponder,updated_at=excluded.updated_at",
+                "transponder=excluded.transponder,updated_at=excluded.updated_at,"
+                "tts_name=excluded.tts_name,avatar_url=excluded.avatar_url",
                 (mid,name,str(data.get("nick") or ""),str(data.get("kelas") or ""),
                  str(data.get("mobil") or ""),old.get("role", "member"),
-                 old.get("status", "active"),json.dumps(ids),time.time(),source))
+                 old.get("status", "active"),json.dumps(ids),time.time(),source,
+                 str(data.get("tts_name") or old.get("tts_name") or ""),
+                 str(data.get("avatar_url") or old.get("avatar_url") or "")))
             if _commit:
                 self._conn.commit()
             return next(m for m in self.members() if m["id"] == mid)
@@ -461,31 +466,35 @@ class ClubStore:
 
     @locked
     def save_preset(self, data: dict) -> dict:
+        from .race_config import normalize
         now = time.time()
         pid = (data.get("id") or "").strip()
-        nama = (data.get("name") or "").strip()
-        if not nama:
-            raise ValueError("Nama preset wajib diisi")
-        target = data.get("target") if data.get("target") in ("time", "laps") else "time"
-        rank = data.get("rank") if data.get("rank") in (
-            "lapsTime", "best", "top3", "consecutive") else "lapsTime"
-        start = data.get("start_mode") if data.get("start_mode") in (
-            "grid", "staggered") else "grid"
-        nilai = int(data.get("value") or 180)
-        cd = int(data.get("cd") or 5)
-        sound = 1 if data.get("sound", 1) else 0
+        existing = self.preset(pid) if pid else None
+        cfg = normalize(data, existing or None)
+        nama, target, nilai = cfg["name"], cfg["target"], cfg["value"]
+        start, rank = cfg["start_mode"], cfg["rank"]
+        cd, sound = cfg["cd"], int(cfg["sound"])
+        random_delay_max = cfg["random_delay_max"]
+        target_time_ms = cfg["target_time_ms"]
+        finish_current_lap = int(cfg["finish_current_lap"])
+        stagger_mode = cfg["stagger_mode"]
+        stagger_gap_ms = cfg["stagger_gap_ms"]
 
         if pid and self.preset(pid):
             self._conn.execute(
                 "UPDATE preset SET name=?, target=?, value=?, rank=?, start_mode=?,"
-                " cd=?, sound=?, updated_at=? WHERE id=?",
-                (nama, target, nilai, rank, start, cd, sound, now, pid))
+                " cd=?, sound=?, random_delay_max=?, target_time_ms=?, finish_current_lap=?,"
+                " stagger_mode=?, stagger_gap_ms=?, updated_at=? WHERE id=?",
+                (nama, target, nilai, rank, start, cd, sound, random_delay_max, target_time_ms,
+                 finish_current_lap, stagger_mode, stagger_gap_ms, now, pid))
         else:
             pid = pid or str(uuid.uuid4())
             self._conn.execute(
                 "INSERT INTO preset (id, name, target, value, rank, start_mode, cd,"
-                " sound, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                (pid, nama, target, nilai, rank, start, cd, sound, now))
+                " sound, random_delay_max, target_time_ms, finish_current_lap, stagger_mode, stagger_gap_ms, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, nama, target, nilai, rank, start, cd, sound, random_delay_max, target_time_ms,
+                 finish_current_lap, stagger_mode, stagger_gap_ms, now))
         self._conn.execute("UPDATE preset SET synced=0, mutation_id=?, sync_error=NULL WHERE id=?",
                            (str(uuid.uuid4()), pid))
         self._conn.commit()
@@ -510,15 +519,24 @@ class ClubStore:
         """
         sid = str(session.get("id") or uuid.uuid4())
         data = dict(session)
+        data.pop("revision", None)
+        data.pop("result_json", None)
+        data.pop("sync", None)
         data.setdefault("schema_version", 1)
+        encoded = json.dumps(data, ensure_ascii=False, sort_keys=True)
+        old = self._conn.execute("SELECT result_json FROM practice_session WHERE id=?", (sid,)).fetchone()
+        if old and old[0] == encoded:
+            return sid
         self._conn.execute(
-            "INSERT OR REPLACE INTO practice_session"
+            "INSERT INTO practice_session"
             "(id,club_id,track_id,track_name,started_at,ended_at,visibility,sync,result_json)"
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "track_name=excluded.track_name, ended_at=excluded.ended_at, "
+            "sync='belum', result_json=excluded.result_json, revision=practice_session.revision+1",
             (sid, club_id or self.club().get("club_id"), data.get("track_id"),
              data.get("track_name") or "", float(data.get("started_at") or time.time()),
              data.get("ended_at"), data.get("visibility") if data.get("visibility") in ("private", "public") else "private",
-             "belum", json.dumps(data, ensure_ascii=False)),
+             "belum", encoded),
         )
         self._conn.commit()
         return sid
@@ -547,9 +565,12 @@ class ClubStore:
         return next((row for row in rows if row.get("id") == sid), None)
 
     @locked
-    def tandai_practice_terkirim(self, sid: str, remote_id: Optional[str] = None) -> bool:
+    def tandai_practice_terkirim(self, sid: str, remote_id: Optional[str] = None,
+                                *, revision: Optional[int] = None) -> bool:
         cur = self._conn.execute(
-            "UPDATE practice_session SET sync='terkirim' WHERE id=?", (sid,))
+            "UPDATE practice_session SET sync='terkirim' WHERE id=?" +
+            (" AND revision=?" if revision is not None else ""),
+            (sid, revision) if revision is not None else (sid,))
         self._conn.commit()
         return cur.rowcount > 0
 
@@ -672,9 +693,37 @@ class ClubStore:
 
     @locked
     def hapus_race(self, rid: str) -> bool:
-        cur = self._conn.execute("DELETE FROM race WHERE id = ?", (rid,))
+        row = self._conn.execute("SELECT club_id, remote_id, track_id FROM race WHERE id=?", (rid,)).fetchone()
+        if not row:
+            return False
+        with self._conn:
+            if row["club_id"]:
+                self._conn.execute("INSERT OR IGNORE INTO race_deletion(id,club_id,remote_id,deleted_at) VALUES (?,?,?,?)",
+                                   (rid, row["club_id"], row["remote_id"], time.time()))
+            self._conn.execute("DELETE FROM race WHERE id=?", (rid,))
+        # Recompute the display record from remaining valid race snapshots.
+        candidates = []
+        for item in self._conn.execute("SELECT result_json FROM race WHERE track_id=?", (row["track_id"],)):
+            saved = json.loads(item[0] or "{}")
+            if not saved.get("timing_interrupted"):
+                candidates.extend(d for d in saved.get("drivers", []) if d.get("best_ms"))
+        winner = min(candidates, key=lambda d: d["best_ms"], default=None)
+        self._conn.execute("UPDATE track SET best_ms=?,holder=?,synced=0,mutation_id=? WHERE id=?",
+                           (winner["best_ms"] if winner else None,
+                            (winner.get("nick") or winner.get("name")) if winner else None,
+                            str(uuid.uuid4()), row["track_id"]))
         self._conn.commit()
-        return cur.rowcount > 0
+        return True
+
+    @locked
+    def pending_race_deletions(self, club_id: str) -> list[dict]:
+        return [dict(row) for row in self._conn.execute(
+            "SELECT * FROM race_deletion WHERE club_id=? ORDER BY deleted_at", (club_id,))]
+
+    @locked
+    def acknowledge_race_deletion(self, rid: str) -> None:
+        self._conn.execute("DELETE FROM race_deletion WHERE id=?", (rid,))
+        self._conn.commit()
 
     @locked
     def ringkasan(self) -> dict:

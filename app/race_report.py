@@ -37,8 +37,8 @@ def table(data,widths,font=7):
     return t
 
 
-def line_chart(drivers,kind):
-    data=chart_data(drivers)[kind];drawing=Drawing(780,360)
+def line_chart(drivers,kind,cfg=None):
+    data=chart_data(drivers,cfg)[kind];drawing=Drawing(780,360)
     n=max((len(d.get('laps',[])) for d in drivers),default=1)
     high=max(1,max((v for series in data for _,v in series),default=1))
     def x(v):return 42+(v-1)/max(1,n-1)*710
@@ -59,7 +59,10 @@ def line_chart(drivers,kind):
 
 
 def distribution(drivers,cfg):
-    pace=[sorted(d['laps'][1:] if cfg.get('start_mode','grid')=='grid' else d['laps']) for d in drivers]
+    # RaceEngine stores only measured laps: the first decoder crossing is kept
+    # as a baseline and is never appended to ``laps``.  Do not discard another
+    # value here; doing so made the PDF disagree with the in-app leaderboard.
+    pace=[sorted(d.get('laps') or []) for d in drivers]
     values=[v for laps in pace for v in laps];height=max(120,len(drivers)*27+50)
     drawing=Drawing(780,height)
     if not values:
@@ -85,14 +88,23 @@ def render_pdf(race):
     styles=getSampleStyleSheet();styles['Normal'].fontSize=8;styles['Normal'].leading=10
     drivers=race.get('drivers',[]);cfg=race.get('cfg',{});story=[]
     def para(text,style='Normal'):return Paragraph(escape(str(text)),styles[style])
-    def heading(title):story.extend([para(title,'Heading3'),Spacer(1,5)])
+    def heading(title):
+        title_flow = para(title, 'Heading3')
+        title_flow.keepWithNext = True
+        spacer = Spacer(1, 5)
+        spacer.keepWithNext = True
+        story.extend([title_flow, spacer])
     def legend():
         return Paragraph(' &nbsp; | &nbsp; '.join('<font color="'+PALETTE[i%len(PALETTE)]+'">'+escape(d.get('nick') or d['name'])+'</font>' for i,d in enumerate(drivers)),styles['Normal'])
     heading('RESULTS')
-    data=[['POS','CHG','DRIVER','GAP SUM','GAP DELTA','LAPS','TOTAL','BEST LAP','TOP3 AVG','TOP3 CONSEC','P80 AVG','CONSISTENCY']]
+    data=[['POS','CHG','DRIVER','GAP SUM','GAP DELTA','LAPS','TOTAL','BEST LAP','TOP3 AVG','TOP3 CONSEC','P80 AVG','CONSISTENCY','KM/H']]
     for d in drivers:
-        data.append([d['pos'],f"{d.get('change',0):+d}",para((d.get('nick') or d['name']) + (' '+d['result_status'] if d.get('result_status') in ('DNS','DNF') else '')),gap(d.get('gap_leader')),gap(d.get('gap_previous')),len(d['laps']),duration(d.get('total_ms')),duration(d.get('best_ms')),duration(d.get('top3_ms')),duration(d.get('consecutive_ms')),duration(d.get('p80_ms')),f"{d['consistency']:.1f}%" if d.get('consistency') is not None else '-'])
-    story += [table(data,[usable*v/669 for v in [25,28,105,50,50,30,60,55,55,76,60,75]],6.5),Spacer(1,12)]
+        driver = (d.get('nick') or d['name']) + (' '+d['result_status'] if d.get('result_status') in ('DNS','DNF') else '')
+        identity = f"#{d.get('no', d['pos'])} · TP {d.get('transponder', '-')}"
+        driver_cell = Paragraph(escape(driver) + '<br/><font size="6" color="#65758a">' + escape(identity) + '</font>', styles['Normal'])
+        data.append([d['pos'],f"{d.get('change',0):+d}",driver_cell,gap(d.get('gap_leader')),gap(d.get('gap_previous')),len(d['laps']),duration(d.get('total_ms')),duration(d.get('best_ms')),duration(d.get('top3_ms')),duration(d.get('consecutive_ms')),duration(d.get('p80_ms')),f"{d['consistency']:.1f}%" if d.get('consistency') is not None else '-',f"{d['top_speed_kmh']:.2f}" if d.get('top_speed_kmh') is not None else '-'])
+    weights = [25,28,110,50,50,30,60,55,55,76,60,75,55]
+    story += [table(data,[usable*v/sum(weights) for v in weights],6.2),Spacer(1,12)]
     heading('LAP TIMES')
     for start in range(0,len(drivers),9):
         group=drivers[start:start+9]
@@ -100,9 +112,9 @@ def render_pdf(race):
         for lap in range(max((len(d['laps']) for d in group),default=0)):
             data.append([lap+1]+[duration(d['laps'][lap]) if lap<len(d['laps']) else '-' for d in group])
         story += [table(data,[35]+[(usable-35)/len(group)]*len(group)),Spacer(1,10)]
-    story.append(para('P80 average: mean of fastest 80% of full laps, rounded up. Consistency: max(0, 1 - population standard deviation / mean) x 100. Grid start segment is included in total, excluded from pace statistics.'))
+    story.append(para('P80 average: mean of fastest 80% of full laps, rounded up. Consistency: max(0, 1 - population standard deviation / mean) x 100. The first decoder crossing is a baseline and is not counted as a completed lap.'))
     for title,kind in [('POSITION PROGRESSION','positions'),('GAP TO LEADER (SECONDS)','gaps')]:
-        story.append(PageBreak());heading(title);story += [line_chart(drivers,kind),legend()]
+        story.append(PageBreak());heading(title);story += [line_chart(drivers,kind,cfg),legend()]
     story.append(PageBreak());heading('LAP TIME DISTRIBUTION (WITH MEDIANS)')
     for start in range(0,len(drivers),10):
         if start:story.append(PageBreak());heading('LAP TIME DISTRIBUTION - CONTINUED')

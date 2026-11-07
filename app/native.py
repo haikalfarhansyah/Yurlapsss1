@@ -69,7 +69,9 @@ class YurLapsWindow:
         self.storage = app.storage
         self.events: "queue.Queue[dict]" = queue.Queue()
         self.page = "practice"
-        self._sound_on = False
+        # Passing acknowledgement is always enabled; countdown/TTS settings
+        # may add other sounds without disabling this safety cue.
+        self._sound_on = True
         self._last_lap_count = 0
         self._edit_tid: Optional[int] = None     # baris Driver yang sedang diedit
         self._draft_tid: Optional[int] = None
@@ -536,6 +538,8 @@ class YurLapsWindow:
 
     # ------------------------------------------------------------ antrean UI
     def _on_engine_event(self, ev: dict) -> None:
+        # Keep every passing event in the UI queue so one decoder hit produces
+        # one audible beep, including ghost/ignored hits.
         self.events.put(ev)
 
     def _on_passing(self, *a) -> None:          # dipanggil dari thread decoder
@@ -544,16 +548,21 @@ class YurLapsWindow:
     def _pump(self) -> None:
         """Ambil event mesin tiap 150 ms. Satu-satunya jalur ke widget Tk."""
         dirty = set()
+        passing_events = 0
         try:
             while True:
                 ev = self.events.get_nowait()
-                dirty.add(ev.get("kind", ""))
+                kind = ev.get("kind", "")
+                dirty.add(kind)
+                if kind == "passing":
+                    passing_events += 1
         except queue.Empty:
             pass
         if dirty:
             if "__passing__" in dirty or "passing" in dirty or "lap" in dirty:
                 self.render_practice()
-                self._maybe_beep()
+                for _ in range(passing_events):
+                    self._beep_passing()
                 if self.page == "decoder":
                     self.render_decoder()
             if "driver" in dirty:
@@ -577,6 +586,14 @@ class YurLapsWindow:
             except Exception:
                 self.root.bell()
         self._last_lap_count = total
+
+    def _beep_passing(self) -> None:
+        """Audible acknowledgement for every raw decoder passing."""
+        try:
+            import winsound
+            winsound.Beep(1450, 70)
+        except Exception:
+            self.root.bell()
 
     def _toggle_sound(self) -> None:
         self._sound_on = not self._sound_on

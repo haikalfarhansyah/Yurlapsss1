@@ -96,22 +96,6 @@ def _run(cmd: list[str], timeout: int = 25) -> str:
 
 def detect(vid: str = "0x0bda", pid: str = "0x2838") -> DeviceInfo:
     """Cari YurLaps Decoder yang terpasang dan periksa driver-nya."""
-    fake = os.environ.get("STINTLAB_FAKE_DEVICE", "").strip().lower()
-    if fake:      # hanya untuk demo/screenshot: pura-pura kondisi tertentu
-        if fake == "ok":
-            return DeviceInfo(present=True, name="Bulk-In, Interface (Interface 0)",
-                              vid=_norm_hex(vid), pid=_norm_hex(pid), driver_ok=True,
-                              service="WinUSB", status="ok",
-                              message="Driver WinUSB siap — YurLaps Decoder bisa dipakai.")
-        if fake == "no_driver":
-            return DeviceInfo(present=True, name="RTL2832U DVB-T",
-                              vid=_norm_hex(vid), pid=_norm_hex(pid), driver_ok=False,
-                              service="RTL2832U", status="no_driver",
-                              message="Dongle memakai driver DVB-T bawaan Windows "
-                                      "(RTL2832U). Perlu diganti ke WinUSB supaya "
-                                      "decoder bisa membukanya.")
-        return DeviceInfo(present=False, status="not_plugged",
-                          message="YurLaps Decoder tidak terdeteksi. Sambungkan perangkatnya.")
     if not IS_WINDOWS:
         return _detect_posix()
 

@@ -55,7 +55,7 @@ class YurLaps:
         if args.data_dir:
             os.environ["YURLAPS_DATA"] = args.data_dir
         self.cfg = Config.load()
-        if args.port:
+        if args.port is not None:
             self.cfg.port = args.port
         if args.host:
             self.cfg.host = args.host
@@ -81,12 +81,13 @@ class YurLaps:
     # ------------------------------------------------------------------
     def start(self) -> tuple[str, int]:
         host = self.cfg.host or "0.0.0.0"
-        port = int(self.cfg.port or 8080)
+        port = int(self.cfg.port if self.cfg.port is not None else 8080)
         self.httpd = start_server(self.ctx, host, port, block=False)
         real_port = self.httpd.server_address[1]
         self._start_engine()
         self.engine.log("ok", f"UI siap di http://localhost:{real_port}")
-        self._hint_lan(real_port)
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            self._hint_lan(real_port)
         return host, real_port
 
     def start_electron(self) -> tuple[str, int]:
@@ -142,13 +143,12 @@ class YurLaps:
 
         self.ctx.cloud.start()
 
-        # Sinkron ke website hanya kalau diminta (default: mati).
-        # Tanpa ini YurLaps tidak menghubungi internet sama sekali.
+        # Optional legacy live-snapshot feed is independent of CloudSync.
         self.online = OnlineSync(self.engine)
         if self.cfg.online_enabled and (self.cfg.online_url or "").strip():
             self.online.start()
         else:
-            self.engine.log("info", "Sinkron ke website: mati (lokal saja)")
+            self.engine.log("info", "Feed snapshot tambahan tidak dikonfigurasi")
 
         threading.Thread(target=self._tick_loop, name="tick", daemon=True).start()
         threading.Thread(target=self._device_loop, name="device-poll",
@@ -220,10 +220,10 @@ class YurLaps:
         self.bus.publish({"kind": "decoder", "at": self.engine.now(), **status})
 
     def _tick_loop(self) -> None:
-        next_device_check = 0.0
         while not self._stop.is_set():
             try:
                 self.engine.tick()
+                self.ctx.tick()
                 if self.ctx._race is not None:
                     self.ctx.race.cek_waktu()
             except Exception as exc:  # pragma: no cover
@@ -232,9 +232,16 @@ class YurLaps:
 
     def stop(self) -> None:
         self._stop.set()
+        if self.decoder is not None:
+            self.decoder.stop()
+            self.decoder.join(timeout=5)
+        try:
+            self.ctx.practice.close_all("application_closed")
+        except Exception as exc:
+            self.engine.log("error", f"Practice gagal disimpan saat aplikasi ditutup: {exc}")
         if self.ctx._cloud is not None:
             self.ctx.cloud.stop()
-        for th in (self.decoder, self.online, self.supervisor):
+        for th in (self.online, self.supervisor):
             try:
                 if th:
                     th.stop()
@@ -266,12 +273,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--data-dir", default=None, help="folder data (portable mode)")
     p.add_argument("--no-browser", action="store_true", help="jangan buka browser")
     p.add_argument("--native", action="store_true",
-                   help="UI native Tkinter (default; tanpa browser & tanpa server web)")
+                   help="alias kompatibilitas untuk --app-window (UI lengkap)")
     p.add_argument("--electron", action="store_true",
                    help="dijalankan oleh jendela aplikasi Electron "
                         "(server lokal 127.0.0.1, port acak)")
     p.add_argument("--web", action="store_true",
-                   help="mode web: buka port HTTP untuk HP/TV (default: native)")
+                   help="mode web: buka port HTTP untuk HP/TV")
     p.add_argument("--desktop", action="store_true", help="buka di jendela aplikasi (pywebview)")
     p.add_argument("--browser", action="store_true",
                    help="paksa mode browser biasa (tanpa jendela aplikasi)")
@@ -348,16 +355,13 @@ def main(argv=None) -> int:
             print(target)
         return 0
 
-    # Default saat dijalankan sebagai aplikasi: UI native Tkinter.
-    # Mode web tetap tersedia (--web / --browser) untuk TV, HP, dan server.
+    # All launcher modes use the same complete UI.
     # Shell Electron memanggil: python -m app --electron
     if getattr(args, "electron", False):
         return run_electron(args)
 
-    wants_web = getattr(args, "web", False) or getattr(args, "browser", False)
-    if getattr(args, "native", False) or not wants_web:
-        from .native import run_native
-        return run_native(args)
+    if getattr(args, "native", False):
+        args.app_window = True
 
     if args.desktop or args.app_window:
         from .desktop import run_desktop
@@ -378,8 +382,6 @@ def main(argv=None) -> int:
     print("\n  Ctrl+C untuk keluar.\n")
 
     if not args.no_browser:
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    elif not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
 
     def _sig(*_):

@@ -16,12 +16,14 @@ import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import urllib.request
+import urllib.error
 
 from .club import ClubStore
 from .cloud_credentials import CredentialStore
 from .cloud_entities import sync_entities, conflicts
-from .member_sync import _read_all, refresh_members
-from .race_upload import SupabaseRaceClient, UploadError, upload_pending, upload_pending_practice
+from .member_sync import _read_all, refresh_members, refresh_visiting_drivers
+from .race_upload import SupabaseRaceClient, UploadError, upload_pending, upload_pending_practice, upload_pending_deletions
 
 DEFAULT_URL = "https://eottbwdcxrhgxadwnlmy.supabase.co"
 # Publishable client key only; authorization is enforced by the user's JWT + RLS.
@@ -112,6 +114,13 @@ class CloudService:
             uid = str(uuid.UUID(user["id"]))
             if user.get("is_anonymous"):
                 raise ValueError("Gunakan akun website YurLaps")
+            profile = {}
+            try:
+                profiles = client._request("/rest/v1/profiles?" + urllib.parse.urlencode(
+                    {"select": "full_name,nickname,avatar_url", "id": "eq."+uid, "limit": 1}))
+                profile = profiles[0] if isinstance(profiles, list) and profiles else {}
+            except Exception:
+                pass  # Account authentication is independent of profile availability.
             clubs = self.leader_clubs(client, uid)
             if not clubs:
                 raise ValueError("Akun ini belum menjadi leader aktif pada club mana pun")
@@ -132,6 +141,8 @@ class CloudService:
             self.on_switch(path)  # can reject if a race is still running/unsaved
             with self.state_lock:
                 self.state = {"project_url": self.url, "user_id": uid, "email": user.get("email", ""),
+                              "name": profile.get("full_name") or profile.get("nickname") or "",
+                              "nickname": profile.get("nickname") or "", "avatar_url": profile.get("avatar_url") or "",
                               "access_token": session["access_token"], "refresh_token": session["refresh_token"],
                               "expires_at": float(session.get("expires_at") or time.time() + 300),
                               "selected_club": selected["id"], "clubs": clubs}
@@ -203,7 +214,7 @@ class CloudService:
 
     def status(self):
         with self.state_lock:
-            state = {k: self.state.get(k) for k in ("user_id", "email", "selected_club", "clubs")}
+            state = {k: self.state.get(k) for k in ("user_id", "email", "name", "nickname", "avatar_url", "selected_club", "clubs")}
             state["login_required"] = bool(self.state.get("user_id") and not self.state.get("refresh_token"))
         state.update(syncing=self.syncing, last_ok=self.last_ok, error=self.last_error,
                      online=bool(self.last_ok and not self.last_error and time.time()-self.last_ok < 90),
@@ -231,10 +242,16 @@ class CloudService:
                     store = ClubStore(path)
                     try:
                         # Upload independently: a metadata conflict never blocks race results.
-                        upload_pending(store, club["id"], self.state["user_id"], client)
-                        upload_pending_practice(store, club["id"], self.state["user_id"], client)
+                        for action in (lambda: upload_pending_deletions(store, club["id"], client),
+                                       lambda: upload_pending(store, club["id"], self.state["user_id"], client),
+                                       lambda: upload_pending_practice(store, club["id"], self.state["user_id"], client)):
+                            try:
+                                action()
+                            except Exception as exc:
+                                errors.append(str(exc))
                         if self.can_refresh(path):
                             refresh_members(store, club["id"], client)
+                            refresh_visiting_drivers(store, club["id"], client)
                             sync_entities(store, club["id"], client)
                             store.set_club(name=club["name"], role="leader", synced_at=time.time())
                     except Exception as exc:
@@ -332,3 +349,36 @@ class CloudService:
         threading.Thread(target=self.login_server.serve_forever, daemon=True).start()
         callback = f"http://127.0.0.1:{self.login_server.server_port}/callback"
         return self.website + "/desktop-login?" + urllib.parse.urlencode({"callback": callback, "state": expected_state})
+
+    def password_login(self, email: str, password: str) -> None:
+        """Authenticate directly with Supabase Auth for the desktop modal.
+
+        The password is used once and is never written to the credential store.
+        Club membership/role checks remain in ``accept_session``.
+        """
+        email = str(email or "").strip()
+        password = str(password or "")
+        if not email or not password:
+            raise ValueError("Email dan password wajib diisi")
+        payload = json.dumps({"email": email, "password": password}).encode("utf-8")
+        req = urllib.request.Request(self.url + "/auth/v1/token?grant_type=password",
+                                     data=payload, method="POST",
+                                     headers={"apikey": self.key,
+                                              "Authorization": "Bearer " + self.key,
+                                              "Content-Type": "application/json",
+                                              "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                session = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = json.loads(exc.read().decode("utf-8"))
+                message = detail.get("msg") or detail.get("error_description") or detail.get("message")
+            except Exception:
+                message = None
+            raise ValueError(message or "Login gagal") from exc
+        except (OSError, ValueError) as exc:
+            raise ValueError("Tidak dapat menghubungi server login") from exc
+        if not session.get("access_token") or not session.get("refresh_token"):
+            raise ValueError("Respons login tidak lengkap")
+        self.accept_session(session)

@@ -32,8 +32,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Install dependensi
-        run: pip install -r requirements.txt flask pyinstaller
+        run: pip install -r requirements.txt
       - name: Pastikan paket yang diunggah versi terbaru
         run: |
           test -f VERSI-PAKET.txt || { echo "VERSI-PAKET.txt tidak ada: zip lama"; exit 1; }
@@ -42,7 +45,7 @@ jobs:
           grep -q '"include"' desktop/package.json && { echo "package.json masih memakai nsis.include"; exit 1; }
           echo "OK: paket terbaru"
       - name: Cek cepat Python polos (tanpa paket apa pun)
-        run: python -S tools/verifikasi_file.py | tail -3
+        run: python -S tools/verifikasi_file.py
       - name: Verifikasi kelengkapan file
         run: python tools/verifikasi_file.py
       - name: Tes logika timing & storage
@@ -50,7 +53,16 @@ jobs:
         env:
           YURLAPS_DATA: ${{ runner.temp }}/yl-smoke
       - name: Tes race offline dan laporan PDF
-        run: python -m unittest discover -s tests -p "test_*.py"
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+        env:
+          YURLAPS_DATA: ${{ runner.temp }}/yl-contract
+      - name: Periksa JavaScript produksi
+        run: |
+          node --check app/static/quickrace.js
+          node --check app/static/sounds.js
+          node --check app/static/updates.js
+          node --check desktop/src/main/index.js
+          node --check desktop/src/main/updates.js
       - name: Tes integrasi REST + SSE
         run: python tests/test_integration.py
         env:
@@ -260,7 +272,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "VERSI-PAKET.txt")) {
-            throw "VERSI-PAKET.txt tidak ada: zip yang diunggah adalah paket lama. Unggah ulang yurlaps-0.3.0-full.zip versi terbaru."
+            throw "VERSI-PAKET.txt tidak ada: zip yang diunggah adalah paket lama. Unggah ulang ZIP sumber YurLaps versi terbaru."
           }
           $t = Get-Content "VERSI-PAKET.txt" -Raw
           if ($t -notmatch "tanpa-hook-nsis") {
@@ -314,7 +326,7 @@ jobs:
         working-directory: ${{ steps.detect.outputs.root }}
         shell: pwsh
         run: |
-          foreach ($file in @("index.html", "quickrace.html", "quickrace.js")) {
+          foreach ($file in @("quickrace.html", "quickrace.js", "sounds.js", "updates.js", "assets/yurlaps-logo.png")) {
             if (-not (Test-Path "desktop\engine\_internal\app\static\$file")) {
               throw "UI web $file tidak ikut dibundel"
             }

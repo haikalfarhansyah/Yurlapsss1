@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  Jalankan YurLaps dengan decoder OpenStint asli
+REM  Jalankan YurLaps production UI dan decoder otomatis
 REM ============================================================
 setlocal
 cd /d "%~dp0"
@@ -10,10 +10,18 @@ if not exist .venv (
   python -m venv .venv
 )
 call .venv\Scripts\activate.bat
-pip install -q pyzmq pywebview
+python -m pip install -q -r requirements.txt
+if errorlevel 1 goto failed
 
 echo.
-echo  Pastikan decoder OpenStint sudah jalan (mengirim ke tcp://127.0.0.1:5556)
+echo  YurLaps akan menjalankan YurLaps Decoder otomatis dan mencoba kembali
+echo  setiap 5 detik jika RTL-SDR belum tersambung.
 echo.
-python -m app --port 8080
+python run_stintlab.py %*
+if errorlevel 1 goto failed
+exit /b 0
+
+:failed
+echo YurLaps gagal dijalankan. Periksa pesan di atas.
 pause
+exit /b 1

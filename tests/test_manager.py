@@ -89,6 +89,7 @@ def test_manager_autorestart():
 
     exe = write_fake_decoder(Path(DATA))
     cfg.decoder_exe = str(exe)
+    cfg.decoder_args = ""
 
     store = Storage()
     eng = Engine(cfg, storage=store)

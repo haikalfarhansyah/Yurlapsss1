@@ -82,6 +82,8 @@ class Updater:
         with self._lock:
             return {
                 "current": APP_VERSION,
+                "provider": "python",
+                "install_supported": bool(getattr(sys, "frozen", False)),
                 "state": self.state,
                 "latest": (self.latest or {}).get("version"),
                 "notes": (self.latest or {}).get("notes", ""),

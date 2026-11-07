@@ -13,7 +13,7 @@ from pathlib import Path
 
 APP_NAME = "YurLaps"
 LEGACY_APP_NAME = "StintLab"   # folder data lama (0.2.x) → dimigrasikan otomatis
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.1"
 
 
 def default_data_dir() -> Path:
@@ -87,7 +87,7 @@ class TransponderMapping:
 class Config:
     # --- decoder -----------------------------------------------------------
     zmq_endpoint: str = "tcp://127.0.0.1:5556"
-    decoder_name: str = "OpenStint"
+    decoder_name: str = "YurLaps Decoder"
 
     # --- manajemen decoder (opsional, Windows) -----------------------------
     manage_decoder: bool = True        # YurLaps yang menjalankan decoder sendiri
@@ -118,6 +118,23 @@ class Config:
     beep_on_lap: bool = True
     announce_lap_times: bool = True   # suara "lap 12, 8 detik 45"
     beep_volume: float = 0.6
+    # Race audio policy.  Browser/desktop presentation reads these values;
+    # timing itself remains independent from audio availability.
+    sound_passing: bool = True
+    sound_ignore: bool = True
+    sound_countdown: bool = True
+    announce_driver: bool = False
+    announce_position_change: bool = False
+    announce_position_mode: str = "off"  # off / passing / changed
+    announce_lap: bool = False
+    announce_best_lap: bool = False
+    announce_best_lap_mode: str = "interval"  # off / interval / immediate
+    announce_best_lap_every: int = 3
+    announce_last_lap: bool = False
+    announce_finish: bool = True
+    tts_rate: float = 1.0
+    tts_voice: str = ""
+    tts_language: str = "id-ID"
 
     # --- server lokal ------------------------------------------------------
     host: str = "0.0.0.0"
@@ -133,8 +150,10 @@ class Config:
     sync_interval: float = 2.0
 
     # --- identitas ---------------------------------------------------------
-    track_name: str = "Sirkuit Latihan"
-    event_name: str = "Practice Day"
+    # Empty until a real track/event is selected or synced from the club.
+    # Keeping these blank prevents first launch from looking like a demo.
+    track_name: str = ""
+    event_name: str = ""
 
     mappings: dict[str, TransponderMapping] = field(default_factory=dict)
 

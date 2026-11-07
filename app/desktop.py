@@ -5,7 +5,7 @@ Tiga tingkatan, dipilih otomatis dari yang paling "native":
 1. **Jendela aplikasi (Edge/Chrome `--app`)** — direkomendasikan.
    Membuka UI di jendela tanpa address bar/tab, memakai profil browser
    terpisah, sehingga terlihat dan terasa seperti aplikasi biasa.
-   Tidak butuh WebView2 maupun pythonnet -> aman di Windows 7/8/8.1/10/11.
+   Tidak butuh pywebview maupun pythonnet. Target rilis Windows 10/11.
 
 2. **pywebview** — jendela native sungguhan, TAPI butuh WebView2 + pythonnet
    yang sering gagal saat dibundel PyInstaller ("Failed to resolve
@@ -49,7 +49,7 @@ def browser_candidates() -> list[Path]:
 
 def find_browser() -> Optional[Path]:
     """Browser Chromium pertama yang benar-benar ada (bisa dioverride env)."""
-    override = os.environ.get("STINTLAB_BROWSER", "").strip()
+    override = (os.environ.get("YURLAPS_BROWSER") or os.environ.get("STINTLAB_BROWSER", "")).strip()
     if override:
         p = Path(override)
         if p.is_file():
@@ -75,6 +75,7 @@ def launch_app_window(url: str, profile_dir: Optional[Path] = None,
         f"--window-size={size[0]},{size[1]}",
         "--no-first-run",
         "--no-default-browser-check",
+        "--autoplay-policy=no-user-gesture-required",
     ]
     if profile_dir is not None:
         try:
@@ -107,10 +108,18 @@ def run_desktop(args) -> int:
 
     _safe_console()
     app = YurLaps(args)
+    # The packaged `--app-window` shell is a local desktop UI. Keep its HTTP
+    # engine loopback-only; LAN/TV access remains explicit via `--web`.
+    if not getattr(args, "web", False) and not getattr(args, "host", None):
+        app.cfg.host = "127.0.0.1"
     _, port = app.start()
     entry = f"http://127.0.0.1:{port}/"
     if app.cfg.access_token:
         entry += f"?t={app.cfg.access_token}"
+
+    if getattr(args, "no_browser", False):
+        print(f"YurLaps berjalan: {entry}")
+        return _keep_alive(app)
 
     # 1) pywebview hanya kalau diminta eksplisit (--desktop)
     if getattr(args, "desktop", False):

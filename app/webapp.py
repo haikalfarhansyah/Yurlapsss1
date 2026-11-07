@@ -29,6 +29,7 @@ from urllib.parse import urlparse, parse_qs
 from .config import APP_VERSION, Config
 from .engine import Engine
 from .net import lan_urls
+from .race_upload import UploadError
 
 def _static_dir() -> Path:
     """Folder UI web. Saat dibundel PyInstaller, file UI ada di _internal/app/static."""
@@ -94,27 +95,56 @@ class AppContext:
         self.updater = None
         self.update_pending = False
         from .practice import PracticeRecorder
-        self.practice = PracticeRecorder(on_close=self._persist_practice)
+        self.practice = PracticeRecorder(on_close=self._persist_practice,
+                                         idle_seconds=getattr(cfg, "idle_split_seconds", 120))
         self._last_practice_persist = 0.0
         self.start_time = time.time()
         previous_event = engine.on_event
-        def route_event(event):
+        def handle_timing_event(event):
             # Practice is automatic while Quick Race is idle.
-            self.practice.tick(race_status=self.race.status, track=self.race._track())
+            self.practice.tick(race_status=self.race.status, track=self.race._track(),
+                               idle_seconds=getattr(self.cfg, "idle_split_seconds", 120))
             if event.get("kind") == "passing":
+                self.club.observe_transponder(event["transponder_id"])
+                practice_result = None
                 if self.race.status == "idle":
-                    self.practice.record(event.get("transponder_id"), event.get("decoder_timecode"))
+                    member = self.club.member_for_transponder(event.get("transponder_id"))
+                    practice_result = self.practice.record(
+                        event.get("transponder_id"), event.get("decoder_timecode"),
+                        member=member,
+                        rssi=event.get("rssi"), hit_count=event.get("hit_count"),
+                        dur_us=event.get("pass_duration_us"),
+                    )
                     self._maybe_persist_practice()
-                self.race.catat(event["transponder_id"],
-                                decoder_ts=event.get("decoder_timecode"),
-                                rssi=event.get("rssi"), hit_count=event.get("hit_count"),
-                                dur_us=event.get("pass_duration_us"))
+                result = self.race.catat(event["transponder_id"],
+                                         decoder_ts=event.get("decoder_timecode"),
+                                         rssi=event.get("rssi"), hit_count=event.get("hit_count"),
+                                         dur_us=event.get("pass_duration_us"))
+                # One authoritative event per raw decoder passing.  The UI
+                # uses this for the immediate beep in both practice and race;
+                # its result must come from the active recorder in practice.
+                self.bus.publish({"kind": "race_passing", "at": time.time(),
+                                  "source": "practice" if self.race.status == "idle" else "race",
+                                  "transponder_id": event.get("transponder_id"),
+                                  "driver": event.get("driver") or "",
+                                  "decoder_timecode": event.get("decoder_timecode"),
+                                  "result": practice_result if self.race.status == "idle" else (result or {})})
             elif event.get("kind") == "noise":
                 self.race.observe_clock(event.get("timecode"))
             elif event.get("kind") == "clock_reset":
                 self.race.clock_reset()
+                self.practice.clock_reset()
             if previous_event:
                 previous_event(event)
+        def route_event(event):
+            if event.get("kind") not in ("passing", "noise", "clock_reset"):
+                if previous_event:
+                    previous_event(event)
+                return
+            # All paths acquire club before practice, including account
+            # switches. This keeps callbacks from saving into the next club.
+            with self._club_lock:
+                handle_timing_event(event)
         engine.on_event = route_event
 
     def _maybe_persist_practice(self) -> None:
@@ -122,16 +152,27 @@ class AppContext:
         now = time.time()
         if now - self._last_practice_persist < 15:
             return
-        snap = self.practice.snapshot().get("session")
-        if not snap or not any(snap.get("laps", {}).values()):
+        sessions = self.practice.snapshot().get("active_sessions") or []
+        if not sessions:
             return
         self._last_practice_persist = now
-        self._persist_practice(snap)
+        for session in sessions:
+            if any((session.get("laps") or {}).values()):
+                try:
+                    self._persist_practice(session)
+                except Exception:
+                    # The next checkpoint retries. Storage problems must not
+                    # suppress the incoming passing event or stop timing.
+                    self._last_practice_persist = 0
 
     def _persist_practice(self, session: dict) -> None:
         """Save idle practice locally with stable driver/transponder identity."""
-        try:
-            drivers = []
+        # Closed recorder sessions already contain an immutable identity
+        # snapshot. Keep it intact so later transponder reassignment does
+        # not rename historical practice data. The fallback supports old
+        # snapshots produced by pre-v2 recorder instances.
+        drivers = list(session.get("drivers") or [])
+        if not drivers:
             for transponder, laps in (session.get("laps") or {}).items():
                 member = self.club.member_for_transponder(transponder) or {}
                 drivers.append({
@@ -143,12 +184,33 @@ class AppContext:
                     "laps_ms": list(laps or []),
                     "best_ms": min(laps) if laps else None,
                 })
-            session = dict(session, drivers=drivers, schema_version=1)
+        session = dict(session, drivers=drivers, schema_version=2,
+                       identity_captured=bool(session.get("identity_captured", True)))
+        try:
             self.club.simpan_practice(session)
             if self._cloud is not None:
                 self._cloud.wake.set()
         except Exception as exc:
             self.engine.log("warning", f"Practice lokal gagal disimpan: {exc}")
+            raise
+
+    def tick(self) -> None:
+        """Advance practice/race clocks even when no browser polls the API."""
+        with self._club_lock:
+            self._tick_locked()
+
+    def _tick_locked(self) -> None:
+        if self.race.status == "idle":
+            active = next((t for t in self.club.tracks() if t.get("active")), None)
+            if active:
+                self.race.set_track(active["id"])
+                self.cfg.track_name = active["name"]
+            else:
+                self.race.track_id = None
+                self.cfg.track_name = ""
+        self.practice.tick(race_status=self.race.status, track=self.race._track(),
+                           idle_seconds=getattr(self.cfg, "idle_split_seconds", 120))
+        self._maybe_persist_practice()
 
     @property
     def club(self):
@@ -183,6 +245,16 @@ class AppContext:
                 with race.lock:
                     if race.status != "idle":
                         raise ValueError("Simpan atau buang sesi race sebelum mengganti akun/club")
+            # Flush practice sessions before replacing the store.  A recorder
+            # session belongs to the selected club and must never leak into
+            # the next account when the operator changes club.
+            if self.practice:
+                self.practice.close_all("club_changed")
+                if self.practice.snapshot()["pending_persistence"]:
+                    raise ValueError("Practice belum tersimpan. Coba lagi setelah penyimpanan pulih")
+                from .practice import PracticeRecorder
+                self.practice = PracticeRecorder(on_close=self._persist_practice,
+                    idle_seconds=getattr(self.cfg, "idle_split_seconds", 120))
             if self._club:
                 self._retired_stores.append(self._club)
             self._club = ClubStore(path)
@@ -320,7 +392,7 @@ def make_handler(ctx: AppContext):
                         ctx.decoder_manager.find_decoder() is not None)
                 if ctx.updater is not None:
                     snap["update"] = ctx.updater.info()
-                ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                ctx.tick()
                 snap["practice"] = ctx.practice.snapshot()
                 # nilai yang dipakai halaman Decoder (jangan menebak di UI)
                 names = {tp: m.get("nick") or m["name"] for m in ctx.club.members()
@@ -361,6 +433,14 @@ def make_handler(ctx: AppContext):
                     pending = conflicts(ctx.club)
                 return self._json({"ok": True, "cloud": ctx.cloud.status(), "conflicts": pending})
 
+            if path == "/api/sound/settings":
+                keys = ("sound_passing", "sound_ignore", "sound_countdown",
+                        "announce_driver", "announce_position_change", "announce_best_lap",
+                        "announce_position_mode", "announce_lap", "announce_best_lap_mode",
+                        "announce_best_lap_every", "announce_last_lap", "announce_finish",
+                        "tts_rate", "tts_voice", "tts_language", "beep_volume")
+                return self._json({"ok": True, "settings": {k: getattr(cfg, k) for k in keys}})
+
             # ---------------- Quick Race (offline) ----------------
             if path == "/api/club":
                 return self._json({"ok": True, "club": ctx.club.club(),
@@ -394,7 +474,7 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
             if path == "/api/practice/state":
-                ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                ctx.tick()
                 ctx._maybe_persist_practice()
                 return self._json({"ok": True, "practice": ctx.practice.snapshot()})
 
@@ -443,25 +523,8 @@ def make_handler(ctx: AppContext):
                                    "drivers": ctx.storage.drivers() if ctx.storage else []})
 
             if path == "/api/session":
-                # Tukar ?t=<token> menjadi cookie HttpOnly, lalu URL dibersihkan
-                # oleh UI. Tujuannya supaya token tidak ikut terkirim saat
-                # pengguna membuka halaman lain / ekspor CSV.
                 want = (cfg.access_token or "").strip()
-                given = str(data.get("token") or "")
-                if not want:
-                    return self._json({"ok": True, "required": False})
-                if given != want:
-                    return self._err(403, "Token salah")
-                cookie = f"yurlaps_token={want}; Path=/; SameSite=Lax; Max-Age=604800"
-                return self._send(200, b'{"ok":true}', "application/json; charset=utf-8",
-                                  {"Set-Cookie": cookie})
-
-            if path == "/api/driver/delete":
-                tid = data.get("transponder_id")
-                if tid is None:
-                    return self._err(400, "transponder_id wajib")
-                engine.remove_driver(int(tid))
-                return self._json({"ok": True, "state": engine.snapshot()})
+                return self._json({"ok": True, "required": bool(want)})
 
             if path == "/api/export.csv":
                 if not ctx.storage:
@@ -505,8 +568,7 @@ def make_handler(ctx: AppContext):
                 # Data dari API lokal, bukan localStorage.
                 return self._serve_static("quickrace.html")
             if path in ("/practice", "/practice/", "/lama", "/lama/"):
-                # UI lama (Practice/Driver/Decoder), disimpan sebagai cadangan
-                return self._serve_static("index.html")
+                return self._serve_static("quickrace.html")
             if path.startswith("/static/"):
                 return self._serve_static(path[len("/static/"):])
             if path == "/favicon.ico":
@@ -522,7 +584,7 @@ def make_handler(ctx: AppContext):
             parsed = urlparse(self.path)
             path = parsed.path
             qs = parse_qs(parsed.query)
-            if not self._token_ok(qs):
+            if path != "/api/session" and not self._token_ok(qs):
                 return self._err(401, "Token akses salah")
             if not self._origin_ok():
                 return self._err(403, "Origin tidak diizinkan")
@@ -532,10 +594,23 @@ def make_handler(ctx: AppContext):
             if not isinstance(data, dict):
                 return self._err(400, "Badan permintaan harus objek JSON")
 
+            if path == "/api/session":
+                want = (cfg.access_token or "").strip()
+                if not want:
+                    return self._json({"ok": True, "required": False})
+                if str(data.get("token") or "") != want:
+                    return self._err(403, "Token salah")
+                cookie = f"yurlaps_token={want}; Path=/; SameSite=Lax; Max-Age=604800"
+                return self._send(200, b'{"ok":true}', "application/json; charset=utf-8",
+                                  {"Set-Cookie": cookie})
+
             if path.startswith("/api/cloud/"):
                 try:
                     if path == "/api/cloud/login":
                         return self._json({"ok": True, "url": ctx.cloud.begin_login()})
+                    if path == "/api/cloud/password-login":
+                        ctx.cloud.password_login(data.get("email"), data.get("password"))
+                        return self._json({"ok": True, "cloud": ctx.cloud.status()})
                     if path == "/api/cloud/logout":
                         ctx.cloud.logout()
                     elif path == "/api/cloud/select":
@@ -549,7 +624,7 @@ def make_handler(ctx: AppContext):
                     else:
                         return self._err(404, "Tidak ditemukan")
                     return self._json({"ok": True, "cloud": ctx.cloud.status()})
-                except (ValueError, KeyError) as exc:
+                except (ValueError, KeyError, OSError, UploadError) as exc:
                     return self._err(409, str(exc))
 
             # ---------------- Quick Race (offline) ----------------
@@ -570,14 +645,18 @@ def make_handler(ctx: AppContext):
             if path == "/api/race/track":
                 try:
                     ctx.race.set_track(data.get("track_id") or "")
+                    track = ctx.club.track(ctx.race.track_id)
+                    ctx.club.save_track(dict(track, active=True))
+                    ctx.tick()
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
             if path == "/api/race/cfg":
-                if ctx.race.status in ("live", "countdown"):
-                    return self._err(409, "Pengaturan race tidak bisa diubah selama sesi berjalan")
-                ctx.race.set_cfg(data)
+                try:
+                    ctx.race.set_cfg(data)
+                except (ValueError, TypeError) as exc:
+                    return self._err(409, str(exc))
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
             if path == "/api/race/peserta":
@@ -593,7 +672,7 @@ def make_handler(ctx: AppContext):
                         if ctx.update_pending:
                             return self._err(409, "Pembaruan sedang dipasang")
                         snap = ctx.race.mulai()
-                        ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                        ctx.tick()
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "race": snap})
@@ -605,20 +684,30 @@ def make_handler(ctx: AppContext):
                     return self._err(400, str(e))
                 return self._json({"ok": True, "race": snap})
 
+            if path == "/api/race/resume":
+                try:
+                    snap = ctx.race.resume()
+                except ValueError as e:
+                    return self._err(409, str(e))
+                return self._json({"ok": True, "race": snap})
+
             if path == "/api/race/pass":
                 return self._err(409, "Pencatatan race hanya menerima lintasan OpenStint.")
 
             if path == "/api/race/finish":
                 try:
                     snap = ctx.race.selesai(data.get("alasan") or "dihentikan operator")
-                    ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                    ctx.tick()
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "race": snap})
 
             if path == "/api/race/reset":
-                snap = ctx.race.reset()
-                ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                try:
+                    snap = ctx.race.reset()
+                except ValueError as exc:
+                    return self._err(409, str(exc))
+                ctx.tick()
                 return self._json({"ok": True, "race": snap})
 
             if path == "/api/practice/visibility":
@@ -627,7 +716,7 @@ def make_handler(ctx: AppContext):
             if path == "/api/race/save":
                 try:
                     info = ctx.race.simpan(data.get("nama"))
-                    ctx.practice.tick(race_status=ctx.race.status, track=ctx.race._track())
+                    ctx.tick()
                     ctx.cloud.wake.set()
                 except ValueError as e:
                     return self._err(400, str(e))
@@ -635,8 +724,27 @@ def make_handler(ctx: AppContext):
                                    "ringkasan": ctx.club.ringkasan()})
 
             if path == "/api/race/discard":
-                ctx.race.buang()
+                try:
+                    ctx.race.buang()
+                except ValueError as exc:
+                    return self._err(409, str(exc))
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
+
+            if path == "/api/race/log/clear":
+                with ctx.race.lock:
+                    ctx.race.log.clear()
+                return self._json({"ok": True, "race": ctx.race.snapshot()})
+
+            if path == "/api/races/delete":
+                rid = str(data.get("id") or "")
+                if not rid:
+                    return self._err(400, "id sesi wajib")
+                ok = ctx.club.hapus_race(rid)
+                if not ok:
+                    return self._err(404, "Sesi tidak ditemukan")
+                if getattr(ctx, "cloud", None) is not None:
+                    ctx.cloud.wake.set()
+                return self._json({"ok": True, "deleted": rid})
 
             if path == "/api/race/upload":
                 rid = data.get("id") or ""
@@ -652,16 +760,20 @@ def make_handler(ctx: AppContext):
 
             if path == "/api/track":
                 try:
+                    if ctx.race.status != "idle":
+                        return self._err(409, "Simpan atau buang sesi lalu Reset sebelum mengubah track")
                     t = ctx.club.save_track(data)
-                    if t.get("active"):
-                        ctx.race.set_track(t["id"])
+                    ctx.tick()
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": True, "track": t, "tracks": ctx.club.tracks()})
 
             if path == "/api/track/delete":
                 try:
+                    if ctx.race.status != "idle":
+                        return self._err(409, "Simpan atau buang sesi lalu Reset sebelum menghapus track")
                     ok = ctx.club.delete_track(data.get("id") or "")
+                    ctx.tick()
                 except ValueError as e:
                     return self._err(400, str(e))
                 return self._json({"ok": ok, "tracks": ctx.club.tracks()})
@@ -698,6 +810,13 @@ def make_handler(ctx: AppContext):
                                      note=data.get("note"))
                 return self._json({"ok": True, "state": engine.snapshot()})
 
+            if path == "/api/driver/delete":
+                try:
+                    engine.remove_driver(int(data["transponder_id"]))
+                except (KeyError, TypeError, ValueError):
+                    return self._err(400, "transponder_id harus angka")
+                return self._json({"ok": True, "state": engine.snapshot()})
+
             if path == "/api/session/new":
                 engine.new_session(data.get("name", ""))
                 return self._json({"ok": True, "state": engine.snapshot()})
@@ -710,13 +829,20 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": True, "state": engine.snapshot()})
 
             if path == "/api/settings":
-                if ctx.race.status in ("live", "countdown") and any(k.startswith("decoder_") or k in ("manage_decoder", "zmq_endpoint") for k in data):
+                if ctx.race.status in ("live", "countdown", "paused") and any(k.startswith("decoder_") or k in ("manage_decoder", "zmq_endpoint") for k in data):
                     return self._err(409, "Pengaturan decoder terkunci selama sesi berjalan")
                 allowed = {
                     "track_name": str, "event_name": str, "zmq_endpoint": str,
                     "idle_split_seconds": int, "min_lap_seconds": float,
                     "beep_on_lap": bool, "announce_lap_times": bool,
                     "beep_volume": float, "access_token": str,
+                    "sound_passing": bool, "sound_ignore": bool, "sound_countdown": bool,
+                    "announce_driver": bool, "announce_position_change": bool,
+                    "announce_position_mode": str, "announce_lap": bool,
+                    "announce_best_lap_mode": str,
+                    "announce_best_lap": bool, "announce_best_lap_every": int,
+                    "announce_last_lap": bool, "announce_finish": bool,
+                    "tts_rate": float, "tts_voice": str, "tts_language": str,
                     "manage_decoder": bool, "decoder_exe": str,
                     "decoder_args": str, "decoder_auto_download": bool,
                     "decoder_gain": float, "decoder_bias_tee": bool,
@@ -729,12 +855,34 @@ def make_handler(ctx: AppContext):
                     "online_url": str,
                     "online_token": str, "sync_interval": float,
                 }
-                for key, typ in allowed.items():
-                    if key in data:
-                        try:
-                            setattr(cfg, key, typ(data[key]))
-                        except (TypeError, ValueError):
-                            pass
+                import math
+                updates = {}
+                ranges = {"idle_split_seconds": (1, 86400), "beep_volume": (0, 1),
+                          "tts_rate": (.5, 2), "announce_best_lap_every": (1, 10000),
+                          "decoder_gain": (0, 49.6)}
+                modes = {"announce_position_mode": ("off", "passing", "changed"),
+                         "announce_best_lap_mode": ("off", "interval", "immediate")}
+                try:
+                    for key, typ in allowed.items():
+                        if key not in data:
+                            continue
+                        value = data[key]
+                        if typ is bool:
+                            if not isinstance(value, bool):
+                                raise ValueError(key + " harus true/false")
+                        else:
+                            value = typ(value)
+                        if typ in (int, float) and not math.isfinite(value):
+                            raise ValueError(key + " harus angka valid")
+                        if key in ranges and not ranges[key][0] <= value <= ranges[key][1]:
+                            raise ValueError(key + " di luar batas yang diizinkan")
+                        if key in modes and value not in modes[key]:
+                            raise ValueError(key + " tidak valid")
+                        updates[key] = value
+                except (TypeError, ValueError) as exc:
+                    return self._err(400, str(exc))
+                for key, value in updates.items():
+                    setattr(cfg, key, value)
                 cfg.save()
                 # gain / opsi radio berubah lewat form setelan -> restart decoder
                 restart = False
@@ -791,7 +939,7 @@ def make_handler(ctx: AppContext):
                 engine.log("info", f"Perangkat: {info.message}")
                 return self._json({"ok": True, "device": info.to_dict()})
 
-            if path in ("/api/decoder/gain", "/api/decoder/restart") and ctx.race.status in ("live", "countdown"):
+            if path in ("/api/decoder/gain", "/api/decoder/restart") and ctx.race.status in ("live", "countdown", "paused"):
                 return self._err(409, "Selesaikan sesi sebelum mengubah gain atau restart decoder.")
 
             if path == "/api/decoder/gain":

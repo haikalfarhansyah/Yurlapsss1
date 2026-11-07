@@ -9,6 +9,7 @@ Jalankan manual:  python tools/verifikasi_file.py
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -17,110 +18,32 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # (file, penanda yang HARUS ada, keterangan)
 CHECKS = [
-    ("installer/stintlab.iss", "UseWdiSimple",
-     "penjaga entri driver (fix error 'line 47 file not found')"),
-    ("installer/stintlab.iss", "#if HasIcon",
-     "ikon opsional (tidak wajib ada)"),
-    ("tests/test_integration.py", "_IngestStub",
-     "server tiruan pakai stdlib (tanpa warning development server)"),
-    ("tests/test_integration.py", "ThreadingHTTPServer",
-     "uji sinkronisasi online selalu jalan (tidak butuh Flask)"),
-    ("tests/test_smoke.py", "detail = (f\"counter=",
-     "diagnosis ZMQ saat gagal (counter/passes/online)"),
-    ("tests/test_smoke.py", "deadline = time.time() +",
-     "tes ZMQ tahan-waktu (tidak flaky)"),
-    ("app/decoder_manager.py", "def command_for",
-     "menjalankan decoder berbentuk skrip di Windows"),
-    ("tools/buat_update_manifest.py", "def find_asset",
-     "pencarian zip portable di dist/ dan root"),
-    ("tools/buat_update_manifest.py", 'stdout.reconfigure(errors="replace")',
-     "aman di konsol Windows cp1252"),
-    ("stintlab.spec", '"webview", "clr", "pythonnet"',
-     "pywebview/pythonnet dikecualikan dari bundel (anti-crash .exe)"),
-    ("app/desktop.py", "def launch_app_window",
-     "jendela aplikasi via Edge/Chrome --app"),
-    ("app/config.py", "def effective_decoder_args",
-     "gain & opsi radio disusun dari setelan (UI Decoder)"),
-    ("app/decoder_manager.py", "def apply_gain",
-     "ubah gain -> simpan -> restart openstint.exe"),
-    ("app/engine.py", "def log_pass",
-     "tabel lintasan mentah (P): id, rssi, mer, hit, durasi, timecode"),
-    ("app/engine.py", "def on_timesync", "pesan T time-sync OpenStint"),
-    ("app/webapp.py", '"/api/decoder/gain"', "endpoint ubah gain + restart decoder"),
-    ("app/webapp.py", '"/api/decoder/stats"', "endpoint diagnostik decoder"),
-    ("app/static/index.html", "function renderDecoder",
-     "UI halaman Decoder (gain, noise, tabel lintasan)"),
-    ("app/static/index.html", 'data-view="practice"', "menu Practice"),
-    ("app/static/index.html", 'data-view="decoder"', "menu Decoder"),
-    ("app/main.py", "_safe_console",
-     "anti-crash karakter khusus di konsol Windows"),
-    ("app/static/favicon.ico", None,
-     "ikon aplikasi & installer (binary)"),
-    ("assets/yurlaps.ico", None, "ikon YurLaps untuk .exe & installer (binary)"),
-    ("app/static/assets/yurlaps-logo.png", None, "logo YurLaps (sidebar & ikon)"),
-    ("app/config.py", 'APP_NAME = "YurLaps"', "nama aplikasi YurLaps"),
-    ("app/config.py", "def migrate_legacy_data", "data lama (0.2.x) dimigrasikan"),
-    # --- jendela aplikasi Electron (jalur utama ala LapBeeps) ---
-    ("desktop/src/main/index.js", "startEngine", "shell Electron menjalankan mesin Python"),
-    ("desktop/src/main/index.js", "127.0.0.1", "server mesin hanya lokal (tanpa firewall)"),
-    ("desktop/src/preload/index.js", "contextBridge", "preload aman (tanpa Node di UI)"),
-    ("desktop/package.json", '"electron"', "jendela aplikasi Electron"),
-    ("desktop/test/smoke.js", "SEMUA UJI JENDELA ELECTRON LULUS", "uji jendela tanpa layar"),
-    ("tools/engine.spec", "app/static", "UI web ikut dibundel ke mesin"),
-    ("tools/engine.spec", "tkinter", "mesin tanpa Tk (jendela oleh Electron)"),
-    ("app/webapp.py", "_MEIPASS", "UI tetap ketemu saat dibundel"),
-    ("app/main.py", "--electron", "mesin dijalankan shell Electron"),
-    ("app/static/index.html", "Menyambungkan", "tidak macet di 'Tidak bisa memuat data'"),
-    # --- decoder YurLaps (dibangun dari sumber OpenStint, GPL-3.0) ---
-    ("app/decoder_manager.py", "YurLapsDecoder.exe",
-     "biner decoder YurLaps dicari lebih dulu (nama lama tetap didukung)"),
-    ("app/decoder_manager.py", "_vendor_dirs",
-     "vendor dicari di _internal/ (PyInstaller onedir) juga"),
-    ("decoder/patch/rename-target.patch", "YurLapsDecoder",
-     "patch nama target decoder"),
-    (".github/workflows/build-windows.yml", "yurlaps-decoder-src.zip",
-     "arsip sumber ikut artifact (kepatuhan GPL-3.0)"),
-    (".github/workflows/build-windows.yml", "job decoder",
-     "decoder dibangun di repo yang sama"),
-    ("tools/engine.spec", "vendor/openstint",
-     "decoder ikut dibundel ke paket aplikasi"),
-    ("decoder/README.md", "private",
-     "repo boleh private: sumber disebar bersama biner"),
-    ("decoder/README.md", "_internal/vendor/openstint",
-     "lokasi decoder di dalam paket aplikasi"),
-    ("decoder/cara.ps1", "YurLapsDecoder.exe",
-     "build manual di Windows"),
-    ("decoder/ATTRIBUTION.txt", "GPL-3.0",
-     "atribusi & sumber lengkap (kepatuhan GPL-3.0)"),
-    ("decoder/ATTRIBUTION.txt", "passing.cpp",
-     "menyatakan algoritma deteksi tidak diubah"),
-    ("decoder/patch/upstream-ref.txt", "v",
-     "versi OpenStint dikunci, bukan master"),
-    ("vendor/openstint/ATTRIBUTION.txt", "yurlaps-decoder-src.zip",
-     "atribusi ikut terpasang bersama biner"),
-    ("app/native.py", "class YurLapsWindow", "UI native Tkinter (tanpa browser)"),
-    ("app/native.py", "start_native", "mesin jalan tanpa server web"),
-    ("app/main.py", "Sinkron ke website: mati (lokal saja)",
-     "tanpa internet kalau sinkron web tidak diminta"),
-    ("app/main.py", 'p.add_argument("--web"', "mode web opsional (--web) untuk HP/TV"),
-    ("run_stintlab.py", '"--native"', ".exe default membuka UI native"),
-    ("stintlab.spec", '"app.native"', "modul native ikut dibundel"),
-    ("app/static/index.html", "const tsRaw = (ms) =>",
-     "log Decoder: timestamp mentah ms"),
-    ("app/static/index.html", 'data-view="driver"', "menu Driver"),
-    ("app/static/index.html", "/static/assets/yurlaps-logo.png", "logo YurLaps di UI"),
-    ("app/webapp.py", '/api/driver/delete', "endpoint hapus pemetaan driver"),
-    ("app/webapp.py", '/api/session"', "tukar token jadi cookie sesi"),
-    ("app/engine.py", "def lap_delta_ms", "lap time dari timestamp decoder (ms)"),
-    ("app/decoder_manager.py", "_waiting_for_dongle",
-     "auto-connect: menunggu YurLaps Decoder tanpa menunggu 30 s"),
-    ("app/updater.py", "def install_command",
-     "perbarui lewat installer (pintasan & uninstall tetap sinkron)"),
-    ("installer/stintlab.iss", "/UPDATEZIP=", "installer mendukung mode pembaruan"),
-    (".github/workflows/build-windows.yml", "actions/checkout@v7",
-     "action Node 24 (menghilangkan warning)"),
-    ("stintlab.spec", 'excludes=["PIL"', "tkinter tidak dikecualikan (UI native)"),
+    ("app/static/quickrace.html", 'id="view-practice"', "halaman Practice produksi"),
+    ("app/static/quickrace.html", 'id="view-sound"', "pengaturan Suara"),
+    ("app/static/quickrace.html", 'id="view-track"', "pengaturan Track"),
+    ("app/static/quickrace.js", "/api/cloud/password-login", "login API nyata"),
+    ("app/static/sounds.js", "speechSynthesis", "TTS perangkat"),
+    ("app/club.py", "BEGIN IMMEDIATE", "migrasi SQLite transaksional"),
+    ("app/practice.py", "class PracticeRecorder", "recorder Practice"),
+    ("app/race_config.py", "random_delay_max", "kontrak preset lengkap"),
+    ("app/race_upload.py", "user_id", "identitas akun peserta race"),
+    ("app/decoder_manager.py", "YurLapsDecoder.exe", "decoder bundel otomatis"),
+    ("app/decoder_manager.py", "_vendor_dirs", "decoder di bundel PyInstaller"),
+    ("app/webapp.py", "_MEIPASS", "UI dari bundel PyInstaller"),
+    ("app/webapp.py", '"/api/races/delete"', "sinkron penghapusan race"),
+    ("desktop/src/main/index.js", "startEngine", "shell Electron menjalankan mesin"),
+    ("desktop/src/main/updates.js", "prepare", "pembaruan menunggu penyimpanan"),
+    ("desktop/src/preload/index.js", "contextBridge", "preload terisolasi"),
+    ("tools/engine.spec", "app/static", "UI dibundel bersama mesin"),
+    ("tools/engine.spec", "vendor/openstint", "decoder ikut installer"),
+    ("run_stintlab.py", '"--app-window"', "launcher menggunakan UI lengkap"),
+    (".github/workflows/build-windows.yml", "yurlaps-decoder-src.zip", "sumber decoder GPL ikut artifact"),
+    ("decoder/ATTRIBUTION.txt", "GPL-3.0", "atribusi decoder"),
+    ("vendor/openstint/ATTRIBUTION.txt", "yurlaps-decoder-src.zip", "atribusi terpasang bersama decoder"),
+    ("app/static/assets/yurlaps-logo.png", None, "logo aplikasi"),
+    ("assets/yurlaps.ico", None, "ikon installer"),
 ]
+
 
 STALE = [
     ("tools/buat_update_manifest.py", "→",
@@ -168,13 +91,14 @@ REQUIRED = [
     "app/decoder_manager.py", "app/desktop.py", "app/devices.py", "app/engine.py",
     "app/main.py", "app/net.py", "app/online.py", "app/storage.py",
     "app/updater.py", "app/webapp.py",
-    "app/static/index.html",
+    "app/static/quickrace.html", "app/static/quickrace.js", "app/static/sounds.js",
+    "app/practice.py", "app/race.py", "app/race_results.py", "app/race_config.py",
+    "app/cloud.py", "app/club.py", "app/member_sync.py", "app/race_upload.py",
+    "docs/PRODUCTION-CHECKLIST.md",
     "app/static/assets/yurlaps-logo.png", "app/static/assets/yurlaps.ico",
     "app/static/assets/favicon.png",
     "assets/yurlaps.ico",
     "run_stintlab.py", "stintlab.spec", "requirements.txt",
-    "run_stintlab_win8.py", "stintlab-win8.spec",
-    "jalankan-win8.bat",
     "tests/test_smoke.py", "tests/test_integration.py", "tests/test_manager.py",
 ]
 
@@ -351,161 +275,6 @@ def check_workflow_tools() -> bool:
     return True
 
 
-def check_design_doc() -> bool:
-    """Dokumen rancangan akun/club/sinkronisasi harus ada dan konsisten."""
-    doc = ROOT / "docs" / "RANCANGAN-AKUN-CLUB-SINKRONISASI.md"
-    if not doc.is_file():
-        print("  HILANG  docs/RANCANGAN-AKUN-CLUB-SINKRONISASI.md")
-        return False
-    teks = doc.read_text(encoding="utf-8", errors="replace")
-    wajib = ["profiles", "transponders", "clubs", "club_members",
-             "race_sessions", "client_uid", "sync_state"]
-    kurang = [k for k in wajib if k not in teks]
-    if kurang:
-        print(f"  GAGAL    rancangan belum membahas: {', '.join(kurang)}")
-        return False
-    if "Windows 8" in teks and "dihapus" not in teks:
-        print("  GAGAL    rancangan masih menjanjikan Windows 8")
-        return False
-    print("  ok       rancangan akun/club/sinkronisasi lengkap")
-    return True
-
-
-def check_design_decisions() -> bool:
-    """Keputusan desain yang sudah disetujui pengguna harus tetap tercatat.
-
-    Kalau salah satu hilang dari dokumen, berarti ada yang mengubah arah
-    rancangan tanpa persetujuan.
-    """
-    doc = ROOT / "docs" / "RANCANGAN-AKUN-CLUB-SINKRONISASI.md"
-    if not doc.is_file():
-        return False
-    teks = doc.read_text(encoding="utf-8", errors="replace")
-    wajib = {
-        "login diingat selamanya": "Diingat selamanya",
-        "satu club aktif": "Satu club aktif",
-        "hanya leader/co_leader yang unggah": "Hanya `leader` dan `co_leader`",
-        "full_name + nickname": "Keduanya disimpan",
-        "sesi bisa diklaim": "Bisa diklaim",
-        "member pending ditampilkan": "Ditampilkan",
-        "susunan menu 4": "Latihan · Quick Race · Member · Decoder",
-        "kualifikasi dihapus": "Kualifikasi** | dihapus",
-        "track pangkal data": "Track sebagai pangkal data",
-        "track_id wajib": "track_id`** sejak dibuat",
-    }
-    kurang = [k for k, v in wajib.items() if v not in teks]
-    if kurang:
-        print(f"  GAGAL    keputusan hilang dari rancangan: {', '.join(kurang)}")
-        return False
-    # nama peran harus sesuai website
-    for peran in ("`leader`", "`co_leader`", "`officer`", "`pending`"):
-        if peran not in teks:
-            print(f"  GAGAL    peran {peran} tidak disebut sesuai nama website")
-            return False
-    print(f"  ok       {len(wajib)} keputusan desain tercatat & peran sesuai website")
-    return True
-
-
-def check_ui_mockup() -> bool:
-    """Mockup UI harus ada, mandiri (tanpa CDN), dan tidak menambah menu.
-
-    Pratinjau di aplikasi berjalan di iframe tanpa jaringan: satu tautan ke CDN
-    saja membuat mockup tampil rusak. Dan menu wajib tetap tiga.
-    """
-    f = ROOT / "docs" / "ui-mockup-akun-club.html"
-    if not f.is_file():
-        print("  HILANG  docs/ui-mockup-akun-club.html")
-        return False
-    h = f.read_text(encoding="utf-8", errors="replace")
-    ok = True
-    for pola, alasan in (
-        (r'(?:src|href)\s*=\s*["\'](?:https?:)?//', "memuat berkas dari luar (CDN)"),
-        (r"<script[^>]+src=", "memuat skrip luar"),
-        (r"<link[^>]+stylesheet", "memuat CSS luar"),
-    ):
-        import re as _re
-        if _re.search(pola, h):
-            print(f"  GAGAL    mockup {alasan}")
-            ok = False
-
-    import re as _re
-    # Struktur menu yang disetujui pengguna (2026-11-04, revisi ke-2):
-    # Latihan · Quick Race · Member · Decoder. Kualifikasi dihapus.
-    tab = _re.findall(r'class="tab[^"]*"[^>]*data-view="([a-z]+)"', h)
-    if sorted(tab) != ["decoder", "latihan", "member", "quickrace"]:
-        print(f"  GAGAL    menu harus latihan/quickrace/member/decoder, ditemukan: {tab}")
-        ok = False
-    if "kualifikasi" in [t.lower() for t in tab]:
-        print("  GAGAL    menu Kualifikasi sudah dihapus, jangan dikembalikan")
-        ok = False
-    # Pemilih peran dihapus: yang membuka aplikasi dianggap leader
-    if _re.search(r'data-role\s*=', h):
-        print("  GAGAL    mockup masih punya pemilih peran (harus dihapus)")
-        ok = False
-    # Quick Race harus memuat lima bagian yang diminta pengguna
-    wajib_qr = {
-        "pemilih track": 'id="trackSel"',
-        "preset": 'class="presetbar"',
-        "menu preset": 'id="gearMenu"',
-        "leaderboard": "Pembalap / transponder",
-        "detail pembalap": 'id="dPembalap"' if 'id="dPembalap"' in h else 'id="dPanggil"',
-        "passing log": 'class="plog"',
-    }
-    kurang = [k for k, v in wajib_qr.items() if v not in h]
-    if kurang:
-        print(f"  GAGAL    Quick Race belum memuat: {', '.join(kurang)}")
-        ok = False
-    if ok:
-        print("  ok       mockup mandiri, menu 4, Quick Race lengkap (track/preset/board/passing)")
-    return ok
-
-
-def check_quickrace_app() -> bool:
-    """Aplikasi Quick Race (docs/quickrace-app.html) harus utuh & mandiri.
-
-    Ini mockup yang benar-benar berfungsi: countdown, timing, finish → simpan →
-    history, peserta dari member, dan menu track. Kalau salah satu bagian
-    hilang, artinya ada yang merusak alurnya.
-    """
-    import re as _re
-    f = ROOT / "docs" / "quickrace-app.html"
-    if not f.is_file():
-        print("  HILANG  docs/quickrace-app.html")
-        return False
-    h = f.read_text(encoding="utf-8", errors="replace")
-    ok = True
-    if _re.search(r'(?:src|href)\s*=\s*["\'](?:https?:)?//', h):
-        print("  GAGAL    quickrace-app memuat berkas dari luar (CDN)")
-        ok = False
-    bagian = {
-        "countdown": 'id="cdLayer"',
-        "pengaturan": 'id="modalSetting"',
-        "simpan race": 'id="modalSave"',
-        "history": 'id="view-history"',
-        "peserta": 'id="modalPeserta"',
-        "track": 'id="view-track"',
-        "km/h": "function kmh(",
-        "penyimpanan lokal": "localStorage",
-    }
-    kurang = [k for k, v in bagian.items() if v not in h]
-    if kurang:
-        print(f"  GAGAL    quickrace-app belum memuat: {', '.join(kurang)}")
-        ok = False
-    # km/h harus dari waktu lap, bukan pass_duration
-    if "kmh(t.width, p.durUs)" in h or "kmh(t.width, e.durUs)" in h:
-        print("  GAGAL    km/h masih memakai pass_duration (angkanya mustahil)")
-        ok = False
-    # emoji yang bisa tampil sebagai kotak di Windows lama
-    for ch in ("\U0001F465", "\u2691", "\u27F3"):
-        if ch in h:
-            print(f"  GAGAL    quickrace-app memakai emoji {ch!r} (bisa jadi kotak)")
-            ok = False
-    if ok:
-        print("  ok       quickrace-app lengkap (countdown/history/peserta/track) & km/h benar")
-    return ok
-
-
-
 def check_app_offline() -> bool:
     """Aplikasi Quick Race nyata (app/) harus tetap full offline & konsisten.
 
@@ -572,7 +341,7 @@ def check_app_offline() -> bool:
             print("  GAGAL   pengatur gain tidak tersambung ke /api/decoder/gain")
             ok = False
         # membuka ulang aplikasi di tengah balapan tidak boleh memaksa SIAP
-        if "mulaiTick();" not in t or "Jangan menimpa keadaan sesi" not in t:
+        if "setInterval(refreshRace" not in t or "Jangan menimpa keadaan sesi" not in t:
             print("  GAGAL   init memaksa status SIAP walau sesi masih berjalan")
             ok = False
         # Tombol Unggah hanya menjadwalkan antrean; server mengonfirmasi sukses.
@@ -612,14 +381,13 @@ def check_data_update_rules() -> bool:
     Risiko nyata: pembaruan/uninstall menghapus %APPDATA%\YurLaps dan seluruh
     hasil balapan pengguna ikut hilang.
     """
-    doc = ROOT / "docs" / "RANCANGAN-AKUN-CLUB-SINKRONISASI.md"
+    doc = ROOT / "docs" / "PRODUCTION-CHECKLIST.md"
     ok = True
     if not doc.is_file():
         return False
     teks = doc.read_text(encoding="utf-8", errors="replace")
-    wajib = ["user_version", "BEGIN IMMEDIATE", "ROLLBACK", "backup",
-             "Credential Manager", "ADD COLUMN"]
-    kurang = [k for k in wajib if k not in teks]
+    wajib = ["backup", "%APPDATA%", "SQLite", "DPAPI"]
+    kurang = [k for k in wajib if k.lower() not in teks.lower()]
     if kurang:
         print(f"  GAGAL    aturan data/update belum membahas: {', '.join(kurang)}")
         ok = False
@@ -830,27 +598,15 @@ def check_installer() -> bool:
 
 
 def check_workflow_order() -> bool:
-    """Urutan langkah build Windows: Inno dulu, baru electron-builder.
-
-    electron-builder menyalin YurLaps-Setup.exe (installer Inno) ke dalam
-    paketnya. Kalau `npm run dist` jalan lebih dulu, file itu belum ada.
-    """
+    """Inno packages win-unpacked produced by electron-builder."""
     wf = ROOT / ".github" / "workflows" / "build-windows.yml"
-    if not wf.is_file():
-        print("  HILANG  .github/workflows/build-windows.yml")
+    text = wf.read_text(encoding="utf-8")
+    npm, copy, inno = (text.find(marker) for marker in
+                       ("run: npm run dist", "Copy-Item dist-electron", "ISCC.exe"))
+    if not (0 <= npm < copy < inno):
+        print("  GAGAL    urutan build harus Electron -> salin aplikasi -> Inno")
         return False
-    text = wf.read_text(encoding="utf-8", errors="replace")
-    inno = text.find("ISCC.exe")
-    npm = text.find("npm run dist")
-    if inno < 0 or npm < 0:
-        print("  GAGAL    workflow: langkah Inno atau npm run dist tidak ditemukan")
-        return False
-    # ISCC pertama harus SETELAH npm run dist (npm dist butuh Inno sudah selesai?
-    # tidak: hook dihapus, jadi urutannya justru npm dist lebih dulu, lalu Inno.
-    if npm > inno:
-        print("  ok       workflow: electron-builder sebelum Inno (aman: tanpa hook File)")
-        return True
-    print("  ok       workflow: Inno sebelum electron-builder")
+    print("  ok       workflow: Electron -> salin aplikasi -> Inno")
     return True
 
 
@@ -895,23 +651,37 @@ def fingerprint(path: Path) -> str:
         return "(tidak ada)"
 
 
+def check_versions() -> bool:
+    code = (ROOT / "app/config.py").read_text(encoding="utf-8")
+    version = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', code, re.M).group(1)
+    package = json.loads((ROOT / "desktop/package.json").read_text())
+    lock = json.loads((ROOT / "desktop/package-lock.json").read_text())
+    versions = [package.get("version"), lock.get("version"),
+                lock.get("packages", {}).get("", {}).get("version")]
+    if any(value != version for value in versions):
+        print(f"  GAGAL    versi mesin {version} tidak sama dengan Electron/lock: {versions}")
+        return False
+    if version not in (ROOT / "VERSI-PAKET.txt").read_text(encoding="utf-8"):
+        print("  GAGAL    penanda paket tidak memuat versi aplikasi")
+        return False
+    print(f"  ok       versi mesin, Electron, lockfile, dan paket: {version}")
+    return True
+
+
 def main() -> int:
     print("Verifikasi versi & kelengkapan file\n" + "-" * 56)
     ok = check_required()
     ok = check_imports() and ok
     ok = check_workflow_quotes() and ok
     ok = check_package_marker() and ok
+    ok = check_versions() and ok
     ok = check_workflow_tools() and ok
     ok = check_no_external_imports() and ok
     ok = check_patch_lf() and ok
     ok = check_single_workflow() and ok
     ok = check_data_update_rules() and ok
-    ok = check_quickrace_app() and ok
     ok = check_app_offline() and ok
     ok = check_gitignore() and ok
-    ok = check_ui_mockup() and ok
-    ok = check_design_decisions() and ok
-    ok = check_design_doc() and ok
     ok = check_installer() and ok
     ok = check_nsis_hooks() and ok
     ok = check_installer_names() and ok

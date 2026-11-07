@@ -39,6 +39,41 @@ def race_payload(race: dict, user_id: str) -> dict:
     club_id = str(uuid.UUID(race["club_id"]))
     raced_at = datetime.datetime.fromtimestamp(
         float(race["started_at"]), datetime.timezone.utc).isoformat()
+    # Keep an immutable account snapshot with every result row.  A transponder
+    # can be reassigned later; historical race names must continue to resolve
+    # to the account that drove this session.
+    result_rows = []
+    for d in race.get("drivers", []):
+        account_id = d.get("account_id") or d.get("user_id") or d.get("driver_id") or d.get("member_id")
+        try:
+            account_id = str(uuid.UUID(str(account_id))) if account_id else None
+        except (ValueError, TypeError, AttributeError):
+            account_id = None
+        result_rows.append({
+            "position": d.get("pos"),
+            "name": d.get("name") or d.get("nick") or "",
+            "driver": d.get("name") or d.get("nick") or "",
+            "nickname": d.get("nick"), "class": d.get("kelas"),
+            "user_id": account_id, "driver_id": account_id, "member_id": account_id,
+            "total_laps": len(d.get("laps") or []),
+            "total_ms": sum(d.get("laps") or []),
+            "transponder": d.get("transponder"), "best_ms": d.get("best_ms"),
+            "top3_ms": d.get("top3_ms"), "consecutive_ms": d.get("consecutive_ms"),
+            "p80_ms": d.get("p80_ms"), "consistency": d.get("consistency"),
+            # `kmh` is a legacy per-row field and is intentionally empty in
+            # RaceEngine result rows.  Upload the calculated session metrics
+            # so the website leaderboard and personal history do not lose
+            # speed data.
+            "speed_kmh": d.get("top_speed_kmh") or d.get("kmh"),
+            "top_speed_kmh": d.get("top_speed_kmh"),
+            "average_speed_kmh": d.get("average_speed_kmh"),
+            "passings": d.get("passings") or [],
+            "result_status": d.get("result_status"),
+            "uid": d.get("uid"), "no": d.get("no"),
+            "change": d.get("change"), "gap_leader": d.get("gap_leader"),
+            "gap_previous": d.get("gap_previous"),
+            "laps_ms": d.get("laps") or [],
+        })
     return {
         "id": remote_race_id(club_id, race["id"]),
         "club_id": club_id,
@@ -48,20 +83,15 @@ def race_payload(race: dict, user_id: str) -> dict:
         "raced_at": raced_at,
         "created_by": user_id,
         "source_race_id": race["id"],
-        "session_data": {"schema_version": 1, "configuration": race.get("cfg", {}),
+        "session_data": {"schema_version": 2, "configuration": race.get("cfg", {}),
+                         "track_id": race.get("track_id"),
+                         "timing_interrupted": bool(race.get("timing_interrupted")),
                          "ended_at": race.get("ended_at"), "loop_width_m": race.get("loop_width_m"),
                          "start_decoder_ts": race.get("start_decoder_ts"),
                          "end_decoder_ts": race.get("end_decoder_ts"),
                          "finish_reason": race.get("finish_reason"),
                          "drivers": race.get("drivers", [])},
-        "results": [{
-            "position": d.get("pos"), "driver": d.get("name"),
-            "nickname": d.get("nick"), "class": d.get("kelas"),
-            "total_laps": len(d.get("laps") or []),
-            "total_ms": sum(d.get("laps") or []),
-            "transponder": d.get("transponder"), "best_ms": d.get("best_ms"),
-            "speed_kmh": d.get("kmh"), "laps_ms": d.get("laps") or [],
-        } for d in race.get("drivers", [])],
+        "results": result_rows,
     }
 
 
@@ -106,6 +136,14 @@ class SupabaseRaceClient:
             raise UploadError("Server belum mengonfirmasi practice")
         return receipt["id"]
 
+    def delete_race(self, club_id: str, race_id: str) -> None:
+        query = urllib.parse.urlencode({"id": "eq." + str(uuid.UUID(race_id)),
+                                         "club_id": "eq." + str(uuid.UUID(club_id))})
+        self._request("/rest/v1/races?" + query, "DELETE", prefer="return=representation")
+        remaining = self._request("/rest/v1/races?" + query + "&select=id")
+        if remaining:
+            raise UploadError("Penghapusan hasil belum dikonfirmasi server")
+
 
 def practice_payload(session: dict, club_id: str, user_id: str, driver: dict) -> dict:
     club_id = str(uuid.UUID(club_id))
@@ -116,34 +154,53 @@ def practice_payload(session: dict, club_id: str, user_id: str, driver: dict) ->
         linked_id = None
     driver_key = str(linked_id or driver.get("transponder"))
     started = datetime.datetime.fromtimestamp(float(session["started_at"]), datetime.timezone.utc).isoformat()
-    ended = datetime.datetime.fromtimestamp(float(session.get("ended_at") or session["started_at"]), datetime.timezone.utc).isoformat()
+    ended = (datetime.datetime.fromtimestamp(float(session["ended_at"]), datetime.timezone.utc).isoformat()
+             if session.get("ended_at") is not None else None)
+    from .practice import practice_stats
+    metrics = practice_stats(driver.get("laps_ms") or [], driver.get("passings") or [])
     return {
         "id": remote_practice_id(club_id, session["id"], driver_key),
         "source_session_id": session["id"], "club_id": club_id,
         "user_id": linked_id,
         "track_id": session.get("track_id"), "track_name": session.get("track_name") or "",
         "started_at": started, "ended_at": ended,
-        "visibility": session.get("visibility") if session.get("visibility") in ("private", "public") else "private",
+        "visibility": "private",  # Initial privacy; subsequent uploads preserve the website owner's choice.
         "laps": [{"transponder": driver.get("transponder"), "driver": driver.get("driver"),
                   "nickname": driver.get("nickname"), "class": driver.get("class"),
-                  "lap_ms": list(driver.get("laps_ms") or [])}],
-        "summary": {"best_ms": driver.get("best_ms"), "lap_count": len(driver.get("laps_ms") or []),
-                    "source_session_id": session["id"], "uploaded_by": user_id},
+                  "laps": list(driver.get("laps_ms") or []),
+                  "lap_ms": list(driver.get("laps_ms") or []),
+                  "passings": driver.get("passings") or [],
+                  "user_id": linked_id, "name": driver.get("name") or driver.get("driver"),
+                  "tts_name": driver.get("tts_name"), "avatar_url": driver.get("avatar_url")}],
+        "summary": {**metrics, "source_session_id": session["id"], "uploaded_by": user_id,
+                    "schema_version": 2, "loop_width_m": session.get("loop_width_m"),
+                    "close_reason": session.get("close_reason"), "min_lap_ms": session.get("min_lap_ms")},
     }
 
 
 def upload_pending_practice(store: ClubStore, club_id: str, user_id: str, client, limit: int = 200) -> int:
     club_id = str(uuid.UUID(club_id)); user_id = str(uuid.UUID(user_id)); uploaded = 0
     for session in store.practice_sessions(limit, pending_only=True):
+        if session.get("club_id") != club_id:
+            continue
         drivers = session.get("drivers") or []
         if not drivers:
-            store.tandai_practice_terkirim(session["id"]); continue
+            store.tandai_practice_terkirim(session["id"], revision=session.get("revision")); continue
         for driver in drivers:
             payload = practice_payload(session, club_id, user_id, driver)
             client.upload_practice(payload)
-        store.tandai_practice_terkirim(session["id"])
+        store.tandai_practice_terkirim(session["id"], revision=session.get("revision"))
         uploaded += 1
     return uploaded
+
+
+def upload_pending_deletions(store: ClubStore, club_id: str, client) -> int:
+    deleted = 0
+    for row in store.pending_race_deletions(club_id):
+        client.delete_race(club_id, row["remote_id"] or remote_race_id(club_id, row["id"]))
+        store.acknowledge_race_deletion(row["id"])
+        deleted += 1
+    return deleted
 
 
 def upload_pending(store: ClubStore, club_id: str, user_id: str, client,

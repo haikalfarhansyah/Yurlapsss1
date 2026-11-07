@@ -130,13 +130,22 @@ def parse_passing(msg: str) -> Optional[Passing]:
     parts = msg.split()
     if len(parts) < 4 or parts[0] != "P":
         return None
+    try:
+        timestamp = int(parts[1])
+        transponder = int(parts[3])
+    except (TypeError, ValueError):
+        # Malformed decoder lines are ignored by the stream worker; keep the
+        # public helper equally safe for callers parsing logs manually.
+        return None
+    if timestamp < 0 or transponder < 0:
+        return None
     return Passing(
-        transponder_id=int(parts[3]),
+        transponder_id=transponder,
         transponder_type=parts[2],
         rssi=_f(parts, 4),
         hit_count=_i(parts, 5),
         pass_duration_us=_i(parts, 6),
         mer=_f(parts, 7),
-        decoder_timecode=int(parts[1]),
+        decoder_timecode=timestamp,
         raw=msg,
     )

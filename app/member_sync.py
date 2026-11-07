@@ -32,7 +32,7 @@ def fetch_members(client, club_id: str) -> list[dict]:
     profiles, transponders = [], []
     for start in range(0, len(ids), 50):
         user_filter = "in.(" + ",".join(ids[start:start + 50]) + ")"
-        profiles.extend(_read_all(client, "profiles", {"select": "id,full_name,nickname,tts_name",
+        profiles.extend(_read_all(client, "profiles", {"select": "id,full_name,nickname,tts_name,avatar_url",
                                   "id": user_filter, "order": "id.asc"}))
         transponders.extend(_read_all(client, "transponders", {
             "select": "user_id,transponder_id,rc_class,rc_brand", "user_id": user_filter,
@@ -52,6 +52,7 @@ def fetch_members(client, club_id: str) -> list[dict]:
         tps = devices[mid]
         members.append({"id": mid, "name": profile.get("full_name") or profile.get("nickname") or mid,
                         "nick": profile.get("nickname") or "", "tts_name": profile.get("tts_name") or "",
+                        "avatar_url": profile.get("avatar_url") or "",
                         "transponder_details": tps, "role": membership["role"],
                         "status": "active", "kelas": tps[0].get("rc_class", "") if tps else "",
                         "mobil": tps[0].get("rc_brand", "") if tps else "",
@@ -76,13 +77,45 @@ def refresh_members(store, club_id: str, client) -> int:
         now = time.time()
         for m in members:
             conn.execute("INSERT INTO member (id, name, nick, kelas, mobil, role, status,"
-                         " transponder, updated_at, tts_name, transponder_details, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,'cloud')",
+                         " transponder, updated_at, tts_name, avatar_url, transponder_details, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'cloud')",
                          (m["id"], m["name"], m["nick"], m["kelas"], m["mobil"],
                           m["role"], m["status"], json.dumps(m["transponder"]), now,
-                          m["tts_name"], json.dumps(m["transponder_details"])))
+                          m["tts_name"], m.get("avatar_url") or "", json.dumps(m["transponder_details"])))
         conn.execute("UPDATE club SET synced_at = ? WHERE id = 1", (now,))
         conn.commit()
     except Exception:
         conn.rollback()
         raise
+    return len(members)
+
+
+def refresh_visiting_drivers(store, club_id: str, client) -> int:
+    """Resolve only transponders observed locally; run on the cloud worker."""
+    observed = store.observed_transponders()
+    if not observed:
+        return 0
+    members = client._request("/rest/v1/rpc/desktop_resolve_drivers", "POST",
+                              {"p_club_id": club_id, "p_transponders": observed})
+    if not isinstance(members, list):
+        raise ValueError("Respons driver tamu tidak valid")
+    conn = store._conn
+    with store.lock, conn:
+        # Keep offline drivers; account-linked visitors refresh atomically.
+        conn.execute("DELETE FROM member WHERE source='guest'")
+        for item in members:
+            mid = str(uuid.UUID(item["id"]))
+            if conn.execute("SELECT 1 FROM member WHERE id=? AND source='cloud'", (mid,)).fetchone():
+                continue
+            devices = item.get("transponder_details") or []
+            ids = [str(d["transponder_id"]) for d in devices
+                   if str(d.get("transponder_id")) in observed]
+            if not ids:
+                continue
+            conn.execute("INSERT INTO member (id,name,nick,kelas,mobil,role,status,transponder,"
+                         "updated_at,tts_name,avatar_url,transponder_details,source) VALUES (?,?,?,?,?,'guest','active',?,?,?,?,?,'guest')",
+                         (mid, item.get("full_name") or item.get("name") or "TP "+ids[0],
+                          item.get("nickname") or item.get("nick") or "",
+                          devices[0].get("rc_class") or "", devices[0].get("rc_brand") or "",
+                          json.dumps(ids), time.time(), item.get("tts_name") or "",
+                          item.get("avatar_url") or "", json.dumps(devices)))
     return len(members)
