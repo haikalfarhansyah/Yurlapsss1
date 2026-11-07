@@ -65,11 +65,10 @@ class OfflineRaceTests(unittest.TestCase):
         self.race.set_cfg({'start_mode':'staggered'});self.go();self.passing(11000);self.passing(22000)
         self.assertEqual(self.race.peserta[0]['laps'],[11000])
 
-    def test_restart_stops_race_without_computer_clock_fallback(self):
+    def test_decoder_restart_keeps_race_live_without_cross_boundary_lap(self):
         self.go();self.passing(11000);self.status(22000);self.status(100);self.passing(200)
-        self.assertEqual(self.race.status,'done')
+        self.assertEqual(self.race.status,'live')
         self.assertEqual(self.race.peserta[0]['laps'],[])
-        self.assertIn('restart',self.race.alasan_selesai)
 
     def test_race_can_start_without_decoder_status(self):
         self.race.mulai()
