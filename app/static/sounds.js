@@ -4,10 +4,11 @@
 const api=window.YurLapsUI.api;
 const $=id=>document.getElementById(id);
 const queue=[];
-let speaking=false,audio=null,sessionId=null,lastEvent=0,pendingBest=null,pollBusy=false;
+let speaking=false,audio=null,hornAudio=null,sessionId=null,lastEvent=0,pendingBest=null,pollBusy=false;
 let settings={sound_passing:true,sound_ignore:true,sound_countdown:true,announce_driver:false,
   announce_position_mode:'off',announce_lap:false,announce_best_lap_mode:'off',announce_best_lap_every:3,
-  announce_last_lap:false,announce_finish:true,tts_rate:1,tts_voice:'',tts_language:'id-ID',beep_volume:.6};
+  announce_last_lap:false,announce_finish:true,tts_rate:1,tts_voice:'',tts_language:'id-ID',beep_volume:.6,
+  horn_enabled:true,horn_file:'builtin'};
 function audioContext(){
   const AC=window.AudioContext||window.webkitAudioContext;
   if(!AC)return null;
@@ -44,6 +45,17 @@ function horn(){
   tone(554,.45,'sawtooth',settings.beep_volume*.25);
   tone(660,.45,'sawtooth',settings.beep_volume*.2);
 }
+function hornUrl(){return settings.horn_file==='custom'?'/api/sound/horn':'/static/assets/air-horn.mp3';}
+function playHorn(){
+  if(!settings.horn_enabled)return;
+  try{
+    hornAudio=hornAudio||new Audio();
+    hornAudio.src=hornUrl();hornAudio.currentTime=0;
+    hornAudio.volume=Math.max(0,Math.min(1,Number(settings.beep_volume)||.6));
+    const p=hornAudio.play();
+    if(p&&p.catch)p.catch(()=>horn());
+  }catch(_){horn();}
+}
 function drain(){
   if(speaking||!queue.length)return;
   const text=queue.shift();
@@ -59,7 +71,7 @@ function drain(){
 function say(text){if(text){queue.push(String(text));drain();}}
 function enqueue(job){
   if(job?.type==='beep')beep(!!job.ignore);
-  else if(job?.type==='horn')horn();
+  else if(job?.type==='horn')playHorn();
   else if(job?.type==='tts')say(job.text);
 }
 function ttsName(e){return String(e.tts_name||'').trim();}
@@ -74,7 +86,7 @@ function processEvents(race){
     lastEvent=e.id;
     const name=ttsName(e),pos=settings.announce_position_mode,best=settings.announce_best_lap_mode;
     if(e.kind==='countdown'&&settings.sound_countdown){countdownTone(e.value);const words=['nol','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan','sepuluh'];say(settings.tts_language.startsWith('id')?(words[e.value]||String(e.value)):String(e.value));}
-    else if(e.kind==='go'&&settings.sound_countdown)horn();
+    else if(e.kind==='go'&&settings.sound_countdown)playHorn();
     else if(e.kind==='stagger_call'&&settings.announce_driver&&name)say(name);
     else if(e.kind==='driver_passing'&&!e.finished&&!e.last_lap&&name){
       const parts=[];
@@ -117,6 +129,8 @@ function renderSettings(){
   $('soundBestMode').value=settings.announce_best_lap_mode;
   $('soundBestEvery').value=settings.announce_best_lap_every;
   $('soundRate').value=settings.tts_rate;$('soundLanguage').value=settings.tts_language;$('soundVolume').value=settings.beep_volume;
+  $('hornEnabled').checked=!!settings.horn_enabled;
+  $('hornFileName').textContent=settings.horn_file==='custom'?'Horn MP3 kustom tersimpan':'Horn bawaan YurLaps';
   refreshVoices();formState();
 }
 async function load(){
@@ -134,6 +148,7 @@ function save(){
   const n=Number($('soundBestEvery').value),rate=Number($('soundRate').value),volume=Number($('soundVolume').value);
   if(!Number.isInteger(n)||n<1||n>999||!Number.isFinite(rate)||rate<.5||rate>2){$('soundSaved').textContent='Periksa interval dan kecepatan suara';return;}
   const body={sound_passing:true,sound_ignore:true,sound_countdown:$('soundCountdown').checked,
+    horn_enabled:$('hornEnabled').checked,horn_file:settings.horn_file,
     announce_driver:$('soundDriver').checked,announce_position_mode:$('soundPositionMode').value,
     announce_position_change:$('soundPositionMode').value==='changed',announce_lap:$('soundLap').checked,
     announce_best_lap_mode:$('soundBestMode').value,announce_best_lap:$('soundBestMode').value!=='off',
@@ -142,8 +157,20 @@ function save(){
   $('soundSaved').textContent='menyimpan…';
   saveChain=saveChain.then(async()=>{try{await api('/api/settings',body);settings={...settings,...body};pendingBest=null;$('soundSaved').textContent='tersimpan';}catch(e){$('soundSaved').textContent='Gagal: '+e.message;}});
 }
-['soundCountdown','soundDriver','soundPositionMode','soundLap','soundBestMode','soundLastLap','soundFinish','soundBestEvery','soundLanguage','soundRate','soundVoice','soundVolume'].forEach(id=>$(id).addEventListener('change',save));
-$('soundTest').addEventListener('click',()=>{beep(false);say('Tes suara YurLaps');});
+['soundCountdown','hornEnabled','soundDriver','soundPositionMode','soundLap','soundBestMode','soundLastLap','soundFinish','soundBestEvery','soundLanguage','soundRate','soundVoice','soundVolume'].forEach(id=>$(id).addEventListener('change',save));
+$('soundTest').addEventListener('click',()=>{beep(false);playHorn();say('Tes suara YurLaps');});
+$('hornBuiltin').addEventListener('click',()=>{settings.horn_file='builtin';save();renderSettings();});
+$('hornFile').addEventListener('change',async()=>{
+  const file=$('hornFile').files[0];if(!file)return;
+  if(!/\.mp3$/i.test(file.name)){ $('hornFileName').textContent='Pilih file MP3'; return; }
+  if(file.size>5*1024*1024){ $('hornFileName').textContent='Ukuran maksimal 5 MB'; return; }
+  const reader=new FileReader();reader.onload=async()=>{try{
+    $('hornFileName').textContent='Mengunggah…';
+    const b64=String(reader.result).split(',')[1]||'';
+    await api('/api/sound/horn/upload',{data:b64,name:file.name});
+    settings.horn_file='custom';renderSettings();$('soundSaved').textContent='Horn tersimpan';
+  }catch(e){$('hornFileName').textContent='Gagal: '+e.message;}};reader.readAsDataURL(file);
+});
 const unlock=()=>{const c=audioContext();$('soundAudioState').textContent=c?'Audio mengikuti output perangkat aktif. Beep setiap passing, TTS bergantian.':'Audio Web tidak tersedia pada perangkat ini.';};
 document.addEventListener('pointerdown',unlock,{once:true});document.addEventListener('keydown',unlock,{once:true});
 if(window.speechSynthesis)speechSynthesis.onvoiceschanged=refreshVoices;

@@ -302,8 +302,9 @@ class DecoderManager(threading.Thread):
         data. Tanda paling andal: tidak ada baris radio (freq) dan tidak ada
         data ZMQ, plus log terakhir memuat keluhan perangkat.
         """
-        if self._device_present is False:
-            return True
+        # USB presence probing is only advisory. Windows driver stacks can
+        # report no device even while OpenStint can open the RTL-SDR. Let the
+        # decoder try first; its own log/error remains the authoritative test.
         if self.engine.decoder_online:
             return False        # ada data ZMQ = perangkat pasti sudah terbuka
         if self.status.freq_hz:

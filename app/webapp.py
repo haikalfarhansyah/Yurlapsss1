@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import mimetypes
+import base64
 import queue
 import threading
 import time
@@ -369,6 +370,14 @@ def make_handler(ctx: AppContext):
                     "started_at": ctx.start_time,
                 })
 
+            if path == "/api/sound/horn":
+                from .config import default_data_dir
+                horn = default_data_dir() / "sounds" / "custom-horn.mp3"
+                if not horn.is_file():
+                    return self._err(404, "Horn kustom belum dipasang")
+                return self._send(200, horn.read_bytes(), "audio/mpeg",
+                                  {"Cache-Control": "no-cache"})
+
             if path.startswith("/api/") and not self._token_ok(qs):
                 return self._err(401, "Token akses salah. Buka URL dengan ?t=<token>.")
 
@@ -435,6 +444,7 @@ def make_handler(ctx: AppContext):
 
             if path == "/api/sound/settings":
                 keys = ("sound_passing", "sound_ignore", "sound_countdown",
+                        "horn_enabled", "horn_file",
                         "announce_driver", "announce_position_change", "announce_best_lap",
                         "announce_position_mode", "announce_lap", "announce_best_lap_mode",
                         "announce_best_lap_every", "announce_last_lap", "announce_finish",
@@ -626,6 +636,29 @@ def make_handler(ctx: AppContext):
                     return self._json({"ok": True, "cloud": ctx.cloud.status()})
                 except (ValueError, KeyError, OSError, UploadError) as exc:
                     return self._err(409, str(exc))
+
+            if path == "/api/sound/horn/upload":
+                raw = data.get("data")
+                if not isinstance(raw, str) or not raw:
+                    return self._err(400, "File MP3 tidak ditemukan")
+                try:
+                    blob = base64.b64decode(raw, validate=True)
+                except (ValueError, TypeError):
+                    return self._err(400, "Data MP3 tidak valid")
+                if len(blob) > 5 * 1024 * 1024:
+                    return self._err(413, "Ukuran horn maksimal 5 MB")
+                if not (blob.startswith(b"ID3") or (len(blob) >= 2 and blob[0] == 0xff and blob[1] & 0xe0 == 0xe0)):
+                    return self._err(400, "File harus berformat MP3")
+                from .config import default_data_dir
+                target = default_data_dir() / "sounds" / "custom-horn.mp3"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp = target.with_suffix(".tmp")
+                tmp.write_bytes(blob)
+                tmp.replace(target)
+                cfg.horn_file = "custom"
+                cfg.horn_enabled = True
+                cfg.save()
+                return self._json({"ok": True, "file": "custom", "url": "/api/sound/horn"})
 
             # ---------------- Quick Race (offline) ----------------
             if path == "/api/members/import":
@@ -843,6 +876,7 @@ def make_handler(ctx: AppContext):
                     "beep_on_lap": bool, "announce_lap_times": bool,
                     "beep_volume": float, "access_token": str,
                     "sound_passing": bool, "sound_ignore": bool, "sound_countdown": bool,
+                    "horn_enabled": bool, "horn_file": str,
                     "announce_driver": bool, "announce_position_change": bool,
                     "announce_position_mode": str, "announce_lap": bool,
                     "announce_best_lap_mode": str,

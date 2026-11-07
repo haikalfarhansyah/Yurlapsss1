@@ -123,6 +123,8 @@ class Config:
     sound_passing: bool = True
     sound_ignore: bool = True
     sound_countdown: bool = True
+    horn_enabled: bool = True
+    horn_file: str = "builtin"
     announce_driver: bool = False
     announce_position_change: bool = False
     announce_position_mode: str = "off"  # off / passing / changed

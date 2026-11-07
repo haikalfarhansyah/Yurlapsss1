@@ -687,6 +687,12 @@
         <div style="padding:16px">
           <div class="card"><h3>Passing dan start</h3><p class="note">Beep selalu aktif untuk setiap passing. Nada berbeda menandai passing yang diabaikan, terlalu cepat, bukan peserta, atau driver sudah finish. Beep langsung berbunyi meskipun TTS sedang berbicara.</p>
             <label class="check-label"><input id="soundCountdown" type="checkbox"> Hitungan suara countdown dan horn saat GO</label>
+            <label class="check-label"><input id="hornEnabled" type="checkbox"> Gunakan suara horn saat GO</label>
+            <div class="field"><label>File horn race</label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn" id="hornBuiltin" type="button">Gunakan horn bawaan</button>
+              <label class="btn" for="hornFile">Tambahkan MP3</label><input id="hornFile" type="file" accept="audio/mpeg,.mp3" hidden>
+              <span class="note" id="hornFileName">Horn bawaan YurLaps</span>
+            </div><p class="note">MP3 disimpan di komputer ini dan dipakai setiap kali countdown mencapai GO. Maksimal 5 MB.</p></div>
             <label class="check-label"><input id="soundDriver" type="checkbox"> Panggil nama driver saat start staggered otomatis</label>
           </div>
           <div class="two">
