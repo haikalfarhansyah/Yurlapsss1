@@ -13,7 +13,7 @@ from pathlib import Path
 
 APP_NAME = "YurLaps"
 LEGACY_APP_NAME = "StintLab"   # folder data lama (0.2.x) → dimigrasikan otomatis
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.4.2"
 
 
 def default_data_dir() -> Path:

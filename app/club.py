@@ -377,6 +377,19 @@ class ClubStore:
         return next((m for m in sorted(self.members(), key=lambda m: 0 if m.get("source") in ("cloud", "guest") else 1) if m.get("status") == "active"
                      and str(transponder) in {str(t) for t in m.get("transponder", [])}), None)
 
+    @locked
+    def delete_member(self, member_id: str) -> bool:
+        """Delete only locally-created offline drivers.
+
+        Website members are authoritative and are refreshed by member sync.
+        """
+        row = self._conn.execute("SELECT source FROM member WHERE id=?", (member_id,)).fetchone()
+        if not row or row[0] in ("cloud", "website", "guest"):
+            return False
+        cur = self._conn.execute("DELETE FROM member WHERE id=?", (member_id,))
+        self._conn.commit()
+        return cur.rowcount > 0
+
     def observe_transponder(self, transponder):
         self._conn.execute("INSERT INTO observed_transponder(transponder,observed_at) VALUES (?,?) "
                            "ON CONFLICT(transponder) DO UPDATE SET observed_at=excluded.observed_at",

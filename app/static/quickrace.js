@@ -779,7 +779,7 @@ function renderMember(){
         ? m.transponder.map(t=>{const car=(m.transponder_details||[]).find(v=>String(v.transponder_id)===String(t));return `<span class="tp">${esc(t)}${car?' · '+esc([car.rc_brand,car.rc_class].filter(Boolean).join(' / ')):''}</span>`;}).join('')
         : '<span style="font-size:10px">transponder belum dipetakan</span>'}<br>${
         esc([m.mobil, m.kelas, m.tts_name?'TTS: '+m.tts_name:'TTS belum diisi'].filter(Boolean).join(' · '))}</span>
-      <span class="role ${esc(m.role)}">${m.source==='guest'?'tamu akun':['website','cloud'].includes(m.source)?'akun club':'offline'}</span>${['cloud','website','guest'].includes(m.source)?'<span class="note">Kelola di website</span>':`<button class="btn sm" data-edit-member="${esc(m.id)}">Edit</button>`}
+      <span class="role ${esc(m.role)}">${m.source==='guest'?'tamu akun':['website','cloud'].includes(m.source)?'akun club':'offline'}</span>${['cloud','website','guest'].includes(m.source)?'<span class="note">Kelola di website</span>':`<button class="btn sm" data-edit-member="${esc(m.id)}">Edit</button><button class="btn sm danger" data-delete-member="${esc(m.id)}">Hapus</button>`}
       <span class="st-p ${m.status}">${m.status === 'active' ? 'aktif' : 'menunggu'}</span>
     </div>`).join('') || '<div class="empty">Tidak ada member yang cocok.</div>';
   $('memberCount').textContent = list.length + ' tampil';
@@ -1189,7 +1189,16 @@ async function refreshAccount(){
   catch(e){ /* account status unavailable while local server starts */ }
 }
 $('btnAkun').onclick=e=>{e.stopPropagation();if(!accountData.user_id){$('modalLogin').hidden=false;$('loginEmail').focus();return;}const m=$('accountMenu');m.hidden=!m.hidden;renderAccount();};
-$('menuLogin').onclick=async()=>{ $('accountMenu').hidden=true; $('modalLogin').hidden=false; $('loginEmail').focus(); };
+$('menuLogin').onclick=async()=>{
+  $('accountMenu').hidden=true;
+  // CAPTCHA belongs to the website. Always hand off login to the default browser.
+  try{
+    const r=await api('/api/cloud/login',{});
+    if(window.yurlapsShell?.openExternal) await window.yurlapsShell.openExternal(r.url);
+    else window.open(r.url,'_blank','noopener,noreferrer');
+    toast('Halaman login dibuka di browser. Kembali ke aplikasi setelah berhasil.');
+  }catch(e){$('loginError').textContent=e.message; $('modalLogin').hidden=false;}
+};
 $('loginCancel').onclick=()=> $('modalLogin').hidden=true;
 $('loginForm').onsubmit=async e=>{
   e.preventDefault();if(accountBusy)return;accountBusy=true;$('loginSubmit').disabled=true;$('loginError').textContent='';
@@ -1271,6 +1280,7 @@ $('memberForm').onsubmit=async e=>{
  }catch(err){gagal(err);}
 };
 $('memberList').addEventListener('click',e=>{const b=e.target.closest('[data-edit-member]');if(b)openMember(b.dataset.editMember);});
+$('memberList').addEventListener('click',async e=>{const b=e.target.closest('[data-delete-member]');if(!b)return;const m=DATA.member.find(x=>x.id===b.dataset.deleteMember);if(!m||!confirm(`Hapus driver offline ${m.nick||m.name}?`))return;try{const r=await api('/api/member/delete',{id:m.id});DATA.member=r.members;renderMember();toast('Driver offline dihapus');}catch(err){gagal(err);}});
 let reportRaceId=null;
 $('sesiPdf').onclick=async()=>{
  if(!reportRaceId)return;

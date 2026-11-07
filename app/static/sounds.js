@@ -28,6 +28,16 @@ function tone(frequency,duration,type,volume){
     oscillator.onended=()=>{oscillator.disconnect();gain.disconnect();};
   }catch(_){/* Audio failure must not stop timing. */}
 }
+function countdownTone(value){
+  // Short WebAudio tones stay aligned with the one-second countdown even when
+  // speech synthesis is busy. The spoken number remains queued separately.
+  const ctx=audioContext();if(!ctx)return;
+  const now=ctx.currentTime,osc=ctx.createOscillator(),gain=ctx.createGain();
+  osc.type='sine';osc.frequency.setValueAtTime(650+Number(value)*28,now);
+  gain.gain.setValueAtTime(Math.max(.01,settings.beep_volume*.28),now);
+  gain.gain.exponentialRampToValueAtTime(.001,now+.12);
+  osc.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.12);
+}
 function beep(ignore){tone(ignore?520:1450,ignore?.12:.07,ignore?'sawtooth':'square',settings.beep_volume*(ignore?.45:.8));}
 function horn(){
   tone(440,.45,'sawtooth',settings.beep_volume*.35);
@@ -63,7 +73,7 @@ function processEvents(race){
     if(!Number.isFinite(e.id)||e.id<=lastEvent)continue;
     lastEvent=e.id;
     const name=ttsName(e),pos=settings.announce_position_mode,best=settings.announce_best_lap_mode;
-    if(e.kind==='countdown'&&settings.sound_countdown){const words=['nol','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan','sepuluh'];say(settings.tts_language.startsWith('id')?(words[e.value]||String(e.value)):String(e.value));}
+    if(e.kind==='countdown'&&settings.sound_countdown){countdownTone(e.value);const words=['nol','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan','sepuluh'];say(settings.tts_language.startsWith('id')?(words[e.value]||String(e.value)):String(e.value));}
     else if(e.kind==='go'&&settings.sound_countdown)horn();
     else if(e.kind==='stagger_call'&&settings.announce_driver&&name)say(name);
     else if(e.kind==='driver_passing'&&!e.finished&&!e.last_lap&&name){

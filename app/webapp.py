@@ -642,6 +642,12 @@ def make_handler(ctx: AppContext):
                     return self._err(400, str(exc))
                 return self._json({"ok": True, "member": member, "members": ctx.club.members()})
 
+            if path == "/api/member/delete":
+                member_id = str(data.get("id") or "")
+                if not ctx.club.delete_member(member_id):
+                    return self._err(403, "Member online dikelola dari website dan tidak dapat dihapus di aplikasi")
+                return self._json({"ok": True, "members": ctx.club.members()})
+
             if path == "/api/race/track":
                 try:
                     ctx.race.set_track(data.get("track_id") or "")

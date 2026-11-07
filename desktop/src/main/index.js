@@ -195,6 +195,10 @@ ipcMain.on('yurlaps:toggle-fullscreen', () => {
   win.setFullScreen(!win.isFullScreen());
 });
 ipcMain.handle('yurlaps:is-fullscreen', () => (win ? win.isFullScreen() : false));
+ipcMain.handle('yurlaps:open-external', (_event, url) => {
+  if (!/^https?:\/\//i.test(url)) throw new Error('URL login tidak valid');
+  return shell.openExternal(url);
+});
 
 // Satu instance saja: dua instance akan berebut port & data
 if (!app.requestSingleInstanceLock()) {

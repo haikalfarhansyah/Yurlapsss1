@@ -153,7 +153,10 @@ class RaceEngine:
             return out
 
     def _pause_if_stale(self, now):
-        if self.status in ("live", "countdown") and now - self.decoder_received_mono >= 5:
+        # A decoder gap must not freeze the countdown before GO. The race is
+        # paused only after it has actually started; GO then creates a clear
+        # timing boundary and missing crossings are never fabricated.
+        if self.status == "live" and now - self.decoder_received_mono >= 5:
             self.status = "paused"
             self.timing_interrupted = True
             self.interrupted_at = now
@@ -250,8 +253,9 @@ class RaceEngine:
                 raise ValueError("Sesi belum siap dimulai")
             if time.monotonic() < self._go_due:
                 return self.snapshot()
-            if self.decoder_ts is None or time.monotonic() - self.decoder_received_mono > 3:
-                raise ValueError("Belum ada jam YurLaps Decoder aktif")
+            # The decoder was validated in mulai(). Do not strand a countdown
+            # when a status packet is momentarily late; the first later packet
+            # is handled by the normal timing interruption guard.
             self.start_decoder_ts = self.decoder_ts
             self.status = "live"
             self.mulai_mono = time.monotonic()
