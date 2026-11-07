@@ -43,7 +43,9 @@ from .config import APP_NAME, APP_VERSION, Config, app_root, default_data_dir
 IS_WINDOWS = os.name == "nt"
 
 # Boleh dikosongkan; pengguna bisa mengisi URL manifest sendiri di Setelan.
-DEFAULT_MANIFEST_URL = "https://yurlaps.dpdns.org/releases/latest.yml"
+# The website publishes a JSON manifest alongside the Electron `latest.yml`.
+# The Python engine consumes JSON (`version`, `url`, `sha256`, `size`).
+DEFAULT_MANIFEST_URL = "https://yurlaps.dpdns.org/releases/manifest.json"
 
 
 # ---------------------------------------------------------------------------

@@ -96,6 +96,7 @@ class DecoderStatus:
     args: list = field(default_factory=list)   # argumen aktif (ditampilkan di UI)
     gain: Optional[float] = None               # gain tuner aktif (dB)
     freq_hz: Optional[float] = None            # frekuensi center dari stderr decoder
+    device_present: Optional[bool] = None     # hasil deteksi USB terakhir
 
     def to_dict(self) -> dict:
         return {
@@ -107,6 +108,7 @@ class DecoderStatus:
             "args": list(self.args or []),
             "gain": self.gain,
             "freq_hz": self.freq_hz,
+            "device_present": self.device_present,
         }
 
 
@@ -116,7 +118,8 @@ class DecoderManager(threading.Thread):
         self.cfg = cfg
         self.engine = engine
         self.on_change = on_change
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
+        self._wake = threading.Event()
         self._lock = threading.RLock()
         self._proc: Optional[subprocess.Popen] = None
         self.status = DecoderStatus()
@@ -128,11 +131,37 @@ class DecoderManager(threading.Thread):
         self._restart_timer: Optional[threading.Timer] = None
         self._restart_lock = threading.Lock()
         self._wanted_stop = False       # True kalau restart memang diminta UI
+        self._device_present: Optional[bool] = None
 
     # ------------------------------------------------------------------
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
+        self._wake.set()
         self._kill_process()
+
+    def _wait(self, timeout: float) -> bool:
+        """Wait for timeout, or wake immediately on a USB state change."""
+        self._wake.wait(timeout)
+        stopped = self._stop_event.is_set()
+        self._wake.clear()
+        return stopped
+
+    def device_changed(self, present: Optional[bool]) -> None:
+        """Wake the supervisor as soon as the USB decoder is plugged in."""
+        if present is None:
+            return
+        present = bool(present)
+        previous = self._device_present
+        self._device_present = present
+        self._publish(device_present=present)
+        if previous is True and not present:
+            self._publish(state="waiting", message="YurLaps Decoder dilepas; menunggu sambungan …")
+            return
+        if not present or previous is present or previous is None:
+            return
+        if self.cfg.manage_decoder and not self._stop_event.is_set():
+            self._wake.set()
+            self.restart_now(reason="YurLaps Decoder tersambung")
 
     # ------------------------------------------------------------------
     def bin_dir(self) -> Path:
@@ -289,7 +318,7 @@ class DecoderManager(threading.Thread):
 
     def _wait_radio_line(self, tries: int = 30) -> None:
         for _ in range(tries):
-            if self._stop.wait(0.5):
+            if self._stop_event.wait(0.5):
                 return
             self._scan_log_for_radio()
             if self.status.freq_hz:
@@ -338,7 +367,7 @@ class DecoderManager(threading.Thread):
         self._publish(mode="managed", state="starting",
                       message="Mencari biner decoder OpenStint …")
 
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             exe = self.find_decoder()
 
             if exe is None:
@@ -347,7 +376,7 @@ class DecoderManager(threading.Thread):
                     # tunggu sebentar, unduhan berjalan di thread terpisah
                     self._publish(state="downloading",
                                   message="Mengunduh YurLaps Decoder …")
-                    self._stop.wait(5)
+                    self._wait(5)
                     continue
                 hint = ("Letakkan biner YurLaps Decoder di folder bin/ atau "
                         "aktifkan unduh otomatis." if self.auto_download_supported
@@ -356,7 +385,7 @@ class DecoderManager(threading.Thread):
                              "binernya di folder bin/.")
                 self._publish(state="error", running=False,
                               message="Decoder belum tersedia. " + hint)
-                self._stop.wait(10)
+                self._wait(10)
                 continue
 
             if not self._proc or self._proc.poll() is not None:
@@ -364,13 +393,13 @@ class DecoderManager(threading.Thread):
                     # jangan berputar cepat kalau masalahnya bukan sementara
                     fatal = any(k in (self.status.last_error or "")
                                 for k in ("tidak cocok", "tidak ditemukan", "hilang"))
-                    self._stop.wait(30 if fatal else min(self._backoff, 10))
+                    self._wait(30 if fatal else min(self._backoff, 10))
                     continue
                 self._backoff = 2.0
 
             # pantau proses + aliran data
             started = time.time()
-            while not self._stop.is_set():
+            while not self._stop_event.is_set():
                 proc = self._proc
                 if proc is None:
                     break
@@ -394,17 +423,23 @@ class DecoderManager(threading.Thread):
                                             f"restart dalam {int(self._backoff)} s")
                     if tail:
                         self.engine.log("warn", f"Log decoder: {tail}")
-                    self._stop.wait(self._backoff)
-                    self._backoff = min(self._backoff * 2,
-                                        float(self.cfg.decoder_restart_max_delay or 30))
+                    # A missing USB dongle has a fixed five-second retry cadence;
+                    # exponential backoff is reserved for decoder crashes.
+                    retry_wait = 5.0 if no_dongle else self._backoff
+                    self._wait(retry_wait)
+                    if no_dongle:
+                        self._backoff = 2.0
+                    else:
+                        self._backoff = min(self._backoff * 2,
+                                            float(self.cfg.decoder_restart_max_delay or 30))
                     break
 
                 # tidak ada data ZMQ padahal proses hidup → anggap macet
                 idle_limit = float(self.cfg.decoder_idle_restart or 15)
                 if self._waiting_for_dongle():
-                    # Perangkat belum tersambung / belum terbaca: jangan tunggu 15 s,
-                    # cek tiap ~1,5 s supaya begitu dicolok langsung tersambung.
-                    dongle_wait = max(1.5, float(idle_limit))
+                    # Perangkat belum tersambung / belum terbaca: retry 5 detik
+                    # sekali agar dongle yang baru dicolok segera diambil alih.
+                    dongle_wait = 5.0
                     if time.time() - started > dongle_wait:
                         if self.status.state != "waiting":
                             self._publish(state="waiting", running=False, pid=None,
@@ -415,7 +450,7 @@ class DecoderManager(threading.Thread):
                         self.status.restarts += 1     # percobaan sambung ulang
                         self._backoff = 1.5
                         break
-                    self._stop.wait(0.5)
+                    self._wait(0.5)
                     continue
                 if time.time() - started > idle_limit:
                     last = self.engine.mono() - self.engine.decoder_last_msg
@@ -432,7 +467,7 @@ class DecoderManager(threading.Thread):
                     self._publish(state="running",
                                   message="Decoder aktif dan mengirim data.")
                     self._backoff = 2.0
-                self._stop.wait(1.0)
+                self._wait(1.0)
 
         self._kill_process()
         self._publish(running=False, state="idle", message="Manajemen decoder berhenti.")
@@ -553,6 +588,7 @@ class DecoderManager(threading.Thread):
             self._kill_process()
             self._wanted_stop = False
         self._backoff = 1.0
+        self._wake.set()
         self._publish(state="starting",
                       message=f"Decoder dijalankan ulang ({reason}) …")
 

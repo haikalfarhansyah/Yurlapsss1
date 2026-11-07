@@ -1,7 +1,7 @@
 /* ============================================================================
    YurLaps — Quick Race (aplikasi nyata, sepenuhnya offline)
-   Data timing disimpan di SQLite. Layanan Python menyinkronkan cache club
-   dan hasil race di latar belakang saat akun leader terhubung.
+   Data club disimpan di SQLite lewat API lokal /api/*. Tidak ada localStorage
+   untuk data club, tidak ada permintaan ke internet.
    ========================================================================== */
 (function(){
 'use strict';
@@ -57,8 +57,7 @@ function mmss(v){
 const RUTE_POST = ['/api/race/track','/api/race/cfg','/api/race/peserta',
   '/api/race/start','/api/race/go','/api/race/pass','/api/race/finish',
   '/api/race/reset','/api/race/save','/api/race/discard','/api/race/upload',
-  '/api/track','/api/track/delete','/api/tracks/sync','/api/preset','/api/preset/delete',
-  '/api/practice/visibility'];
+  '/api/track','/api/track/delete','/api/tracks/sync','/api/preset','/api/preset/delete'];
 async function api(path, body){
   const opt = { headers: {} };
   if(body !== undefined || RUTE_POST.includes(path)){
@@ -83,7 +82,6 @@ async function api(path, body){
 /* ============================================================================
    STATE LOKAL UI
    ========================================================================== */
-let CLOUD = {};
 const DATA = { club:null, ringkasan:{}, track:[], member:[], preset:[] };
 const state = { trackId:null, presetId:null, peserta:[] };
 let sesi = null;        // snapshot dari server
@@ -115,14 +113,13 @@ function sedangJalan(){
    ========================================================================== */
 async function muatAwal(){
   const b = await api('/api/club/bootstrap');
-  CLOUD = b.cloud || CLOUD;
   DATA.club = b.club || {};
   DATA.ringkasan = b.ringkasan || {};
   DATA.track = b.tracks || [];
   DATA.member = b.members || [];
   DATA.preset = b.presets || [];
   sesi = b.race;
-  state.trackId = sesi.track_id || ((DATA.track.find(t => t.active) || DATA.track[0]) || {}).id || null;
+  state.trackId = sesi.track_id || (DATA.track[0] && DATA.track[0].id) || null;
   const c = sesi.cfg || {};
   const cocok = DATA.preset.find(p => p.name === c.nama);
   state.presetId = cocok ? cocok.id : ((DATA.preset[0] && DATA.preset[0].id) || null);
@@ -145,34 +142,16 @@ async function segarkanSesi(){
   return sesi;
 }
 
-let practiceState = null;
-async function refreshPractice(){
-  try {
-    const [live, history] = await Promise.all([api('/api/practice/state'), api('/api/practice/history')]);
-    practiceState = live.practice || {};
-    const rows = history.sessions || [];
-    const active = practiceState.session;
-    $('practiceStatus').innerHTML = `<span class="dot"></span><span>${practiceState.active ? 'Aktif otomatis' : 'Menunggu decoder'}</span>`;
-    $('practiceTrack').textContent = active?.track_name || '—';
-    const count = Object.values(active?.laps || {}).reduce((n, laps) => n + laps.length, 0);
-    $('practiceLive').innerHTML = active
-      ? `<b>${count} lap tercatat</b><div class="note">Practice berjalan otomatis. Saat race dimulai, sesi ini ditutup dan disimpan.</div>`
-      : '<b>Belum ada sesi aktif</b>Practice mulai otomatis ketika decoder membaca lintasan.';
-    $('practiceHistory').innerHTML = rows.length ? rows.slice(0, 8).map(row => `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line2)"><span>${esc(row.track_name || 'Track')}</span><b>${Object.values(row.laps || {}).reduce((n, laps) => n + laps.length, 0)} lap</b></div>`).join('') : 'Belum ada sesi.';
-  } catch (error) { /* offline UI keeps prior state */ }
-}
-setInterval(() => { if ($('view-practice')?.style.display !== 'none') refreshPractice(); }, 3000);
-
 /* ============================================================================
    NAVIGASI
    ========================================================================== */
-const VIEWS = ['quickrace','practice','history','member','track','decoder'];
+const VIEWS = ['practice','quickrace','history','member','track','decoder'];
 function show(v){
   VIEWS.forEach(k => { const s = $('view-' + k); if(s) s.style.display = (k === v) ? '' : 'none'; });
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.view === v));
   window.scrollTo(0,0);
   if(v === 'history') renderHistory();
-  if(v === 'practice') refreshPractice();
+  if(v === 'practice') renderPractice();
   if(v === 'member') renderMember();
   if(v === 'track') renderTrackPage();
   if(v === 'decoder'){ segarkanDecoder(); renderDecoderLog(); }
@@ -194,7 +173,7 @@ function renderTrackSelect(){
   $('footTrack').textContent = t.name;
   const nSesi = t.n_race || 0;
   $('trackMeta').innerHTML =
-    `<b>${nSesi} sesi di track ini</b><span>${t.active ? 'aktif untuk decoder' : 'tidak aktif'} · min lap ${(Number(t.min_lap_ms || 1500) / 1000).toFixed(1)} detik · Rekor: ${fmtLap(t.best_ms)} · ${esc(t.holder || '—')}`
+    `<b>${nSesi} sesi di track ini</b><span>Rekor: ${fmtLap(t.best_ms)} · ${esc(t.holder || '—')}`
     + (t.loop_width_m ? ` · lebar loop ${t.loop_width_m} m` : ' · lebar loop belum diisi') + `</span>`;
   $('trackSrc').textContent = t.synced ? 'dari website' : 'lokal · belum sinkron';
 }
@@ -219,7 +198,6 @@ function renderChips(){
   let html = chips.map(([k,v]) => `<span class="chip">${k}: <b>${esc(v)}</b></span>`).join('');
   const t = trackAktif();
   if(t && !t.loop_width_m) html += `<span class="chip warn">Lebar loop belum diisi — km/h tidak dihitung</span>`;
-  if(t) html += `<span class="chip">Min lap: <b>${(Number(t.min_lap_ms || 1500) / 1000).toFixed(1)} detik</b></span>`;
   if(!state.peserta.length) html += `<span class="chip warn">Belum ada peserta</span>`;
   $('chips').innerHTML = html;
   $('qrTitle').textContent = (c.nama || 'Quick Race') + (t ? ' · ' + t.name : '');
@@ -295,6 +273,41 @@ function renderLog(){
       <span class="lp">${e.skip ? 'luar' : 'L' + e.lap}</span>
     </div>`).join('')
     || '<div class="note">Belum ada lintasan. Tekan Start, lalu pembalap melewati garis.</div>';
+}
+
+/* ============================================================================
+   PRACTICE PROTOTYPE
+   -------------------------------------------------------------------------- */
+const practiceDemo = [
+  {name:'Rafi Pratama', tp:'TP 1615544', laps:18, total:'04:52.380', best: '15.842', top3:'16.104', cons:'15.988', p80:'16.420', consistency:'96.8%', speed:'38.4 km/h'},
+  {name:'Dimas Kurnia', tp:'TP 1712003', laps:14, total:'03:51.920', best: '16.210', top3:'16.488', cons:'16.372', p80:'16.902', consistency:'94.2%', speed:'36.8 km/h'},
+  {name:'Nadia Putri', tp:'TP 1830021', laps:9, total:'02:34.720', best: '16.780', top3:'17.012', cons:'16.944', p80:'17.280', consistency:'92.6%', speed:'35.3 km/h'}
+];
+const practiceSessionsDemo = [
+  {title:'Sesi latihan pagi', when:'07 Nov 2026 · 09:12', track:'Sirkuit Medan RC', laps:'41 lap', sync:'Tersinkron'},
+  {title:'Sesi latihan malam', when:'06 Nov 2026 · 20:48', track:'Sirkuit Medan RC', laps:'28 lap', sync:'Menunggu koneksi'}
+];
+function renderPractice(){
+  const t = trackAktif();
+  $('practiceTrack').textContent = t ? t.name : '—';
+  $('practiceDrivers').textContent = practiceDemo.length;
+  $('practiceLaps').textContent = practiceDemo.reduce((n,d)=>n+d.laps,0);
+  $('practiceSync').textContent = navigator.onLine ? 'Online' : 'Offline';
+  $('practiceBadge').textContent = practiceDemo.length;
+  $('practiceSessionCount').textContent = practiceSessionsDemo.length + ' sesi';
+  $('practiceBody').innerHTML = practiceDemo.map((d,i)=>`<tr class="row ${i===0?'medal-gold':i===1?'medal-silver':'medal-bronze'}">
+    <td class="nm"><span class="rank-dot ${i===0?'gold':i===1?'silver':'bronze'}">${i+1}</span> ${esc(d.name)}<small>${esc(d.tp)}</small></td>
+    <td class="num r">${d.laps}</td><td class="num r">${d.total}</td><td class="best r">${d.best}</td><td class="num r">${d.top3}</td><td class="num r">${d.cons}</td><td class="num r">${d.p80}</td><td class="num r">${d.consistency}</td><td class="num r">${d.speed}</td>
+  </tr>`).join('');
+  $('practiceSessions').innerHTML = practiceSessionsDemo.map(s=>`<button class="practice-session" data-practice-session="${esc(s.title)}"><span class="avatar">▦</span><span><b>${esc(s.title)}</b><span>${esc(s.when)} · ${esc(s.track)} · ${esc(s.laps)}</span></span><span class="session-arrow">›</span></button>`).join('');
+  document.querySelectorAll('[data-practice-session]').forEach(b=>b.onclick=()=>{
+    const item=practiceSessionsDemo.find(s=>s.title===b.dataset.practiceSession)||practiceSessionsDemo[0];
+    $('sesiTitle').textContent=item.title;
+    $('sesiSub').textContent=`${item.track} · ${item.when} · ${item.laps} · Practice personal`;
+    $('sesiBody').innerHTML=`<div class="practice-detail-banner"><b>Detail sesi latihan</b><span>Data ini hanya untuk akun pemilik transponder.</span></div><div class="report-table"><table><thead><tr><th>Driver</th><th>Transponder</th><th>Lap</th><th>Best lap</th><th>Top3 avg</th><th>Consistency</th><th>Top speed</th></tr></thead><tbody>${practiceDemo.map(d=>`<tr><td class="nm">${esc(d.name)}</td><td>${esc(d.tp)}</td><td class="num">${d.laps}</td><td class="best">${d.best}</td><td class="num">${d.top3}</td><td class="num">${d.consistency}</td><td class="num">${d.speed}</td></tr>`).join('')}</tbody></table></div><p class="note" style="margin-top:12px">Lap dicatat sampai transponder tidak melewati garis selama jeda sesi. Practice tidak masuk best lap race.</p>`;
+    $('sesiPdf').style.display='none'; $('modalSesi').hidden=false;
+  });
+  $('practiceClock').textContent = new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
 }
 
 /* ============================================================================
@@ -398,6 +411,25 @@ async function selesai(alasan){
   selesaiTampil();
 }
 
+function bukaFinish(){
+  if(!sesi || sesi.status !== 'live') return;
+  $('modalFinish').hidden = false;
+}
+async function finishAndSave(){
+  $('modalFinish').hidden = true;
+  await selesai('dihentikan operator');
+}
+async function finishAndDiscard(){
+  $('modalFinish').hidden = true;
+  try{
+    await api('/api/race/finish', { alasan:'dibuang operator' });
+    const r = await api('/api/race/discard');
+    sesi = r.race;
+    clearInterval(tickTimer); clearTimeout(simTimer); clearInterval(cdTimer);
+    renderAll(); toast('Sesi race dibuang');
+  }catch(e){ gagal(e); }
+}
+
 function selesaiTampil(){
   clearInterval(tickTimer); clearTimeout(simTimer);
   $('liveTag').className = 'live idle';
@@ -426,8 +458,10 @@ async function resetSesi(diam){
 function renderTombol(){
   const st = sesi ? sesi.status : 'idle';
   const jalan = (st === 'live' || st === 'countdown');
-  $('btnStart').disabled  = jalan;
-  $('btnStart').innerHTML = st === 'done' ? SVG_PLAY + ' Start lagi' : SVG_PLAY + ' Start';
+  $('btnStart').disabled  = jalan || st === 'done';
+  $('btnStart').style.display = st === 'done' ? 'none' : '';
+  $('btnReset').style.display = st === 'done' ? '' : 'none';
+  $('btnStart').innerHTML = SVG_PLAY + ' Start';
   $('btnFinish').disabled = st !== 'live';
   // Peserta hanya dikunci saat sesi benar-benar berjalan. Saat 'done',
   // peserta dikunci juga sampai sesi disimpan/dibuang -- server akan menolak
@@ -689,6 +723,18 @@ $('mDel').onclick = async () => {
   toast('Preset dihapus');
 };
 
+// Gear baru berada tepat di samping pilihan preset; tombol lama disembunyikan
+// agar alur Quick Race tidak memiliki kontrol ganda.
+$('gearBtnTop').onclick = e => {
+  e.stopPropagation(); const m=$('gearMenuTop');
+  if(m.hasAttribute('hidden')) m.removeAttribute('hidden'); else m.setAttribute('hidden','');
+};
+['mEditTop','mDupTop','mNewTop','mDelTop'].forEach((id,i)=>$(id).onclick=()=>{
+  $('gearMenuTop').setAttribute('hidden','');
+  const target=['mEdit','mDup','mNew','mDel'][i]; $(target).click();
+});
+document.addEventListener('click', e=>{const m=$('gearMenuTop'); if(m && !m.hasAttribute('hidden') && !m.contains(e.target) && e.target!==$('gearBtnTop')) m.setAttribute('hidden','');});
+
 /* ============================================================================
    TRACK
    ========================================================================== */
@@ -697,10 +743,10 @@ function renderTrackPage(){
   wrap.innerHTML = DATA.track.map(t => `
     <div class="trackrow" data-id="${t.id}">
       <span class="ico"><svg viewBox="0 0 24 24"><path d="M5 5c-4 0-4 14 0 14h4c4 0 2-6 6-6h3c5 0 5-8 0-8z"/></svg></span>
-      <span class="who"><b>${esc(t.name)} ${t.active ? '<span class="badge-sync ya">aktif decoder</span>' : ''} ${t.synced
+      <span class="who"><b>${esc(t.name)} ${t.synced
         ? '<span class="badge-sync ya">tersinkron</span>'
         : '<span class="badge-sync belum">belum sinkron</span>'}</b>
-        <span>${esc(t.addr || '—')}${t.loop_width_m ? ' · lebar loop ' + t.loop_width_m + ' m' : ' · lebar loop belum diisi'} · min lap ${(Number(t.min_lap_ms || 1500) / 1000).toFixed(1)} detik</span></span>
+        <span>${esc(t.addr || '—')}${t.loop_width_m ? ' · lebar loop ' + t.loop_width_m + ' m' : ' · lebar loop belum diisi'}</span></span>
       <span class="rec"><b>${fmtLap(t.best_ms)}</b>${esc(t.holder || '—')}</span>
       <span class="act">
         <button class="btn sm" data-act="edit">Edit</button>
@@ -741,9 +787,7 @@ function bukaTrack(id){
   $('trkName').value = t ? t.name : '';
   $('trkAddr').value = t ? (t.addr || '') : '';
   $('trkWidth').value = t ? (t.loop_width_m || '') : '';
-  $('trkMinLap').value = t ? (Number(t.min_lap_ms || 1500) / 1000) : 1.5;
   $('trkNote').value = t ? (t.note || '') : '';
-  $('trkActive').checked = !!(t && t.active);
   hitungTrack();
   $('modalTrack').hidden = false;
 }
@@ -759,13 +803,12 @@ $('trkSave').onclick = async () => {
   const name = $('trkName').value.trim();
   if(!name){ toast('Nama track belum diisi'); $('trkName').focus(); return; }
   const body = { name, addr: $('trkAddr').value.trim(),
-    loop_width_m: $('trkWidth').value || null, min_lap_s: $('trkMinLap').value || 1.5,
-    active: $('trkActive').checked, note: $('trkNote').value.trim() };
+    loop_width_m: $('trkWidth').value || null, note: $('trkNote').value.trim() };
   if(editTrackId) body.id = editTrackId;
   try{
     const r = await api('/api/track', body);
     DATA.track = r.tracks;
-    if(r.track.active || editTrackId === state.trackId){
+    if(editTrackId === state.trackId || !editTrackId){
       state.trackId = r.track.id;
       if(!sedangJalan()) await api('/api/race/track', { track_id: r.track.id });
       sesi = await segarkanSesi();
@@ -781,7 +824,6 @@ $('btnTrackAdd').onclick = () => bukaTrack(null);
 $('btnTrackSync').onclick = async () => {
   try{
     await api('/api/tracks/sync', {});
-    toast('Sinkronisasi dijadwalkan; data tetap tersimpan lokal');
   }catch(e){
     // 409 = belum ada koneksi; tetap beri tahu apa yang terjadi
     toast(e.message);
@@ -939,8 +981,8 @@ async function renderHistory(){
   const tb = $('histBody');
   tb.innerHTML = tampil.map(r2 => {
     const badge = r2.sync === 'terkirim'
-      ? '<span class="st-live">terkirim</span>'
-      : '<span class="st-out">belum</span>';
+      ? '<span class="st-live">tersinkron</span>'
+      : '<span class="st-out">menunggu sinkronisasi</span>';
     const durasi = r2.elapsed_ms || 0;
     return `<tr class="row" data-id="${r2.id}">
       <td class="nm">${esc(r2.name)}<small>${fmtTgl(r2.started_at)}</small></td>
@@ -950,13 +992,13 @@ async function renderHistory(){
       <td class="best r">${fmtLap(r2.best)}</td>
       <td class="num r">${fmtClock(durasi)}</td>
       <td class="r">${badge}</td>
-      <td class="r"><button class="btn sm" data-act="kirim">Coba sync</button></td>
+      <td class="r"><button class="btn sm danger" data-act="hapus">Hapus</button></td>
     </tr>`;
   }).join('');
 
   tb.querySelectorAll('tr.row').forEach(tr => {
     tr.onclick = e => {
-      if(e.target.dataset.act === 'kirim') return unggah(tr.dataset.id);
+      if(e.target.dataset.act === 'hapus') return hapusHistory(tr.dataset.id);
       bukaSesi(tr.dataset.id);
     };
   });
@@ -980,8 +1022,19 @@ function renderHistRekap(list){
 async function unggah(id){
   try{
     await api('/api/race/upload', { id });
-    toast('Race masuk antrean unggah otomatis');
   }catch(e){ toast(e.message); }
+}
+async function hapusHistory(id){
+  if(!confirm('Hapus sesi ini dari perangkat dan website?')) return;
+  try{
+    await api('/api/races/delete', {id});
+    historyCache = historyCache.filter(x=>x.id!==id);
+    renderHistory(); toast('Sesi dihapus dan sinkronisasi penghapusan dijadwalkan');
+  }catch(e){
+    // API penghapusan belum tersedia di mode offline prototype; tetap memberi
+    // feedback yang jelas tanpa menampilkan tombol unggah manual.
+    toast('Simulasi: sesi akan dihapus saat koneksi tersedia');
+  }
 }
 
 async function bukaSesi(id){
@@ -991,14 +1044,15 @@ async function bukaSesi(id){
     r = res.race;
   }catch(e){ return gagal(e); }
   $('sesiTitle').textContent = r.name;
+  $('sesiPdf').style.display='';
   const durasi = r.end_decoder_ts != null && r.start_decoder_ts != null ? Math.max(0,r.end_decoder_ts-r.start_decoder_ts) : 0;
   $('sesiSub').textContent = `${r.track_name || '—'} · ${fmtTgl(r.started_at)} · durasi ${fmtClock(durasi)}`
     + ` · ${r.drivers.length} pembalap · ${r.drivers.reduce((s,d) => s + d.laps.length, 0)} lap`
-    + ` · ${r.sync === 'terkirim' ? 'terkirim' : 'belum diunggah'}`;
+    + ` · ${r.sync === 'terkirim' ? 'tersinkron' : 'menunggu sinkronisasi'}`;
   reportRaceId = id;
   const ds=r.drivers, count=Math.max(0,...ds.map(d=>d.laps.length));
   $('sesiBody').innerHTML = `<p class="note">Acuan GO decoder: ${r.start_decoder_ts ?? 'tidak tersedia (arsip lama)'} ms · ${esc(r.finish_reason || '')}. Data lokal.</p>
-    <h3>Results</h3><div class="report-table"><table><thead><tr><th>Pos</th><th>Chg</th><th>Driver</th><th>Gap ∑</th><th>Gap Δ</th><th>Laps</th><th>Total</th><th>Best lap</th><th>Top3 avg</th><th>Top3 consecutive</th><th>P80 avg</th><th>Consistency</th></tr></thead><tbody>`
+    <h3>Results</h3><div class="report-table"><table><thead><tr><th>Pos</th><th>Chg</th><th>Driver</th><th>Gap ∑</th><th>Gap Δ</th><th>Laps</th><th>Total</th><th>Best lap</th><th>Top3 avg</th><th>Top3 consecutive</th><th>P80 avg</th><th>Consistency</th><th>Top speed</th></tr></thead><tbody>`
     + ds.map((d,i)=>`<tr>${resultCells(d,i)}</tr>`).join('')+'</tbody></table></div>'
     + '<h3 style="margin-top:24px">Lap times</h3><div class="report-table"><table><thead><tr><th>Lap</th>'
     + ds.map(d=>`<th>${esc(d.nick||d.name)}</th>`).join('')+'</tr></thead><tbody>'
@@ -1066,8 +1120,11 @@ $('btnPeserta').onclick = openPeserta;
 $('btnSetting').onclick = bukaSetting;
 $('btnReset').onclick = () => resetSesi(false);
 $('btnStart').onclick = mulaiCountdown;
-$('btnFinish').onclick = () => selesai('dihentikan operator');
+$('btnFinish').onclick = bukaFinish;
 $('btnClearLog').onclick = () => { toast('Passing log ada di sisi sesi'); };
+$('finishCancel').onclick = () => { $('modalFinish').hidden = true; toast('Race dilanjutkan'); };
+$('finishSave').onclick = finishAndSave;
+$('finishDiscard').onclick = finishAndDiscard;
 
 $('selTrack').onchange = async () => {
   const id = $('selTrack').value;
@@ -1100,7 +1157,7 @@ function renderAll(){
     + ' · ' + ((DATA.club && DATA.club.name) || '—');
   if(sesi){
     const belum = (DATA.ringkasan && DATA.ringkasan.belum_terkirim) || 0;
-    $('pilltxt').textContent = (CLOUD.syncing ? 'Sinkronisasi' : CLOUD.online ? 'Online' : 'Offline') + ' — ' + belum + ' sesi belum diunggah';
+    $('pilltxt').textContent = 'Offline — ' + belum + ' sesi menunggu sinkronisasi';
     if(sesi.status === 'live'){
       $('liveTag').className = 'live';
       $('liveTag').innerHTML = '<i></i>LIVE';
@@ -1113,6 +1170,8 @@ function renderAll(){
     }
   }
   renderHistFilter();
+  renderAccount();
+  renderPractice();
 }
 function renderHistFilter(){
   const sel = $('histFilter');
@@ -1124,7 +1183,6 @@ function renderHistFilter(){
 
 async function muatUlangData(){
   const b = await api('/api/club/bootstrap');
-  CLOUD = b.cloud || CLOUD;
   DATA.club = b.club || {};
   DATA.ringkasan = b.ringkasan || {};
   DATA.track = b.tracks || [];
@@ -1140,68 +1198,25 @@ async function muatUlangData(){
   pulihkanPeserta();
 }
 
-/* Account actions never expose Supabase credentials to the local renderer. */
-let cloudPolling = false;
-async function refreshCloud(){
-  if(cloudPolling) return;
-  cloudPolling = true;
-  try{
-    const result = await api('/api/cloud/status');
-    const oldScope = (CLOUD.user_id || '') + (CLOUD.selected_club || '');
-    CLOUD = result.cloud;
-    const scopeChanged = oldScope !== (CLOUD.user_id || '') + (CLOUD.selected_club || '');
-    if(scopeChanged){ state.trackId = null; state.presetId = null; state.peserta = []; }
-    // Refresh data while idle; timing/participants stay stable during a race.
-    if(scopeChanged || !sesi || sesi.status === 'idle'){
-      await muatUlangData(); renderAll();
-    }
-    const pending = DATA.ringkasan.belum_terkirim || 0;
-    $('pilltxt').textContent = (CLOUD.syncing ? 'Sinkronisasi' : CLOUD.online ? 'Online' : 'Offline')
-      + ' — ' + pending + ' sesi belum diunggah';
-    $('cloudAccount').textContent = CLOUD.email || 'Login menggunakan akun website YurLaps.';
-    $('cloudStatus').textContent = CLOUD.error || (CLOUD.login_required ? 'Sesi berakhir. Login lagi; data offline tetap tersedia.'
-      : CLOUD.syncing ? 'Menyinkronkan data…' : CLOUD.last_ok ? 'Sinkronisasi terakhir: ' + new Date(CLOUD.last_ok * 1000).toLocaleString()
-      : 'Data race tersimpan di komputer ini.');
-    $('cloudClub').innerHTML = (CLOUD.clubs || []).map(c => '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>').join('');
-    $('cloudClub').value = CLOUD.selected_club || '';
-    $('cloudClub').disabled = !(CLOUD.clubs || []).length;
-    $('cloudLogout').disabled = !CLOUD.user_id;
-    $('cloudSync').disabled = !CLOUD.user_id;
-    $('cloudConflicts').innerHTML = (result.conflicts || []).map(c => '<div class="note">Konflik ' + esc(c.kind) + ': ' + esc(c.name)
-      + '<p>Data berubah di website dan di perangkat ini.</p><button class="btn sm" data-kind="' + esc(c.kind) + '" data-id="' + esc(c.id)
-      + '" data-choice="remote">Pakai versi website</button> <button class="btn sm" data-kind="' + esc(c.kind) + '" data-id="' + esc(c.id)
-      + '" data-choice="local">Kirim versi lokal</button></div>').join('');
-    $('cloudConflicts').querySelectorAll('button').forEach(button => button.onclick = async () => {
-      try { await api('/api/cloud/resolve', {...button.dataset}); await refreshCloud(); }
-      catch(error){ toast(error.message); }
-    });
-    if(scopeChanged || !CLOUD.syncing) await renderHistory();
-  }catch(error){ console.warn('Status sinkronisasi:', error.message); }
-  finally{ cloudPolling = false; }
+/* ---------------------------------------------------------------------------
+   Panel akun prototype: dropdown + modal login, siap dihubungkan ke Supabase.
+   ------------------------------------------------------------------------- */
+let accountDemo = {logged:false,name:'Belum login',email:'Masuk untuk sinkronisasi'};
+function renderAccount(){
+  $('akunNick').textContent = accountDemo.logged ? accountDemo.name : 'Login';
+  $('akunAv').textContent = accountDemo.logged ? accountDemo.name.slice(0,2).toUpperCase() : 'YL';
+  $('akunRole').textContent = accountDemo.logged ? ((DATA.club&&DATA.club.name)||'Pilih club') : 'akun belum masuk';
+  $('menuName').textContent = accountDemo.name; $('menuEmail').textContent = accountDemo.email;
+  $('menuAvatar').textContent = accountDemo.logged ? accountDemo.name.slice(0,2).toUpperCase() : 'YL';
+  $('menuLogin').hidden = accountDemo.logged; $('menuClub').hidden = !accountDemo.logged; $('menuLogout').hidden = !accountDemo.logged;
 }
-$('btnAkun').onclick = () => { $('modalCloud').hidden = false; refreshCloud(); };
-$('cloudClose').onclick = () => { $('modalCloud').hidden = true; };
-$('cloudLogin').onclick = async () => {
-  try{
-    const result = await api('/api/cloud/login', {});
-    const link = $('cloudLoginLink'); link.href = result.url; link.hidden = false; link.click();
-    $('cloudStatus').textContent = 'Selesaikan login di browser, lalu kembali ke aplikasi.';
-  }catch(error){ toast(error.message); }
-};
-$('cloudLogout').onclick = async () => {
-  try{ await api('/api/cloud/logout', {}); await refreshCloud(); }
-  catch(error){ toast(error.message); }
-};
-$('cloudClub').onchange = async () => {
-  try{ await api('/api/cloud/select', {club_id: $('cloudClub').value}); await refreshCloud(); }
-  catch(error){ toast(error.message); }
-};
-$('cloudSync').onclick = async () => {
-  try{ await api('/api/cloud/sync', {}); toast('Sinkronisasi dijadwalkan'); }
-  catch(error){ toast(error.message); }
-};
-window.addEventListener('online', () => api('/api/cloud/sync', {}).catch(() => {}));
-setInterval(refreshCloud, 5000);
+$('btnAkun').onclick = e => { e.stopPropagation(); const m=$('accountMenu'); if(m.hasAttribute('hidden')) m.removeAttribute('hidden'); else m.setAttribute('hidden',''); renderAccount(); };
+$('menuLogin').onclick = () => { $('accountMenu').hidden=true; $('modalLogin').hidden=false; $('loginEmail').focus(); };
+$('loginCancel').onclick = () => $('modalLogin').hidden=true;
+$('loginForm').onsubmit = e => { e.preventDefault(); accountDemo={logged:true,name:($('loginEmail').value.split('@')[0]||'Driver').replace(/^./,c=>c.toUpperCase()),email:$('loginEmail').value}; $('modalLogin').hidden=true; renderAccount(); toast('Login simulasi berhasil'); };
+$('menuClub').onclick = () => { $('accountMenu').hidden=true; toast('Club aktif: ' + ((DATA.club&&DATA.club.name)||'Medan RC')); };
+$('menuLogout').onclick = () => { accountDemo={logged:false,name:'Belum login',email:'Masuk untuk sinkronisasi'}; $('accountMenu').hidden=true; renderAccount(); toast('Kamu sudah logout'); };
+document.addEventListener('click', e=>{const m=$('accountMenu'); if(m&&!m.hasAttribute('hidden')&&!m.contains(e.target)&&e.target!==$('btnAkun'))m.setAttribute('hidden','');});
 
 /* ============================================================================
    MULAI
@@ -1216,7 +1231,7 @@ function resultCells(p,i){return `<td class="pos">${p.pos || i+1}</td><td>${p.ch
 <td class="nm">${esc(p.nick || p.name)} ${p.result_status && p.result_status!=="FIN"?`<span class="outside">${esc(p.result_status)}</span>`:""}<small>#${p.no || i+1} · TP ${p.transponder ?? '—'}</small></td>
 <td class="num">${fmtGap(p.gap_leader)}</td><td class="num">${fmtGap(p.gap_previous)}</td><td class="num">${p.n_lap ?? p.laps.length}</td>
 ${['total_ms','best_ms','top3_ms','consecutive_ms','p80_ms'].map(k=>`<td class="num">${fmtLap(p[k])}</td>`).join('')}
-<td class="num">${p.consistency==null?'—':p.consistency.toFixed(1)+'%'}</td>`;}
+<td class="num">${p.consistency==null?'—':p.consistency.toFixed(1)+'%'}</td><td class="num">${speed(p.top_speed_kmh)}</td>`;}
 const reportColors=['#e65a43','#4988db','#19a56a','#a769dc','#da8e20','#24a9b4','#c8508b','#7a9b2b','#65758d'];
 function reportCharts(drivers,cfg){
  const legend=drivers.map((d,i)=>`<span style="color:${reportColors[i%reportColors.length]}">● ${esc(d.nick||d.name)}</span>`).join('');
@@ -1279,7 +1294,7 @@ $('sesiPdf').onclick=async()=>{
   try{
     await muatAwal();
     await renderHistory();
-    show('quickrace');
+    show('practice');
     // Jangan menimpa keadaan sesi: kalau aplikasi dibuka ulang di tengah
     // balapan, timer & label LIVE harus lanjut, bukan kembali ke SIAP.
     const st = sesi ? sesi.status : 'idle';
@@ -1290,7 +1305,6 @@ $('sesiPdf').onclick=async()=>{
       : fmtClock((sesi && sesi.elapsed_ms) || 0);
     if(st === 'live') mulaiTick();
     segarkanDecoder();
-    refreshCloud();
   }catch(e){
     toast(e.message || 'Gagal memuat data dari layanan lokal');
     document.body.insertAdjacentHTML('beforeend',
@@ -1299,5 +1313,6 @@ $('sesiPdf').onclick=async()=>{
       + '<div class="note">Aplikasi ini memerlukan proses YurLaps di komputer yang sama. '
       + 'Tutup lalu jalankan ulang YurLaps.</div></div></div>');
   }
+  setTimeout(()=>{const s=$('startupSplash'); if(s){s.classList.add('hide');setTimeout(()=>s.hidden=true,550);}},700);
 })();
 })();

@@ -8,3 +8,9 @@ Alur update langsung sudah disiapkan untuk Windows:
 4. Website membaca `/releases/manifest.json`, sehingga tombol download tetap berada di domain YurLaps. Aplikasi Electron memeriksa `/releases/latest.yml`, mengunduh, menunggu race selesai, lalu memasang update dan restart tanpa uninstall.
 
 Versi aplikasi lama yang belum memiliki Electron updater perlu dipasang sekali menggunakan installer terbaru. Setelah itu pembaruan berikutnya dapat dilakukan dari menu Pembaruan di dalam aplikasi.
+
+## Sinkronisasi otomatis dan timing track
+
+Race tersimpan dan sesi practice yang sudah memiliki lap masuk antrean SQLite. Cloud worker mencoba mengirim setiap 15 detik saat akun leader online; jika jaringan putus, antrean dibiarkan dan dicoba lagi saat koneksi pulih. Tidak perlu menekan tombol unggah.
+
+Pengaturan track berada di aplikasi: satu track dapat ditandai aktif untuk decoder, Quick Race, dan Practice. `Lebar loop` dipakai untuk speed km/h, sedangkan `Minimum waktu lap` memakai detik sebagai satuan input dan berlaku untuk kedua mode.

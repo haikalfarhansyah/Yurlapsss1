@@ -127,6 +127,7 @@ class YurLaps:
         self.supervisor = DecoderManager(self.cfg, self.engine,
                                          on_change=self._on_decoder_status)
         self.ctx.decoder_manager = self.supervisor
+        self.supervisor.device_changed(self._device_seen)
         if self.cfg.manage_decoder:
             self.supervisor.start()
         else:
@@ -154,7 +155,7 @@ class YurLaps:
                          daemon=True).start()
     _device_seen = None
 
-    def _device_loop(self, every: float = 10.0) -> None:
+    def _device_loop(self, every: float = 5.0) -> None:
         """Pantau YurLaps Decoder berkala → tersambung/terputus langsung terdeteksi."""
         while not self._stop.is_set():
             try:
@@ -198,6 +199,9 @@ class YurLaps:
             prev = self._device_seen
             now_seen = bool(getattr(info, "present", False))
             self._device_seen = now_seen
+            supervisor = self.supervisor
+            if supervisor is not None:
+                supervisor.device_changed(now_seen)
             # hanya catat di log kalau statusnya berubah, jangan banjiri log
             if prev != now_seen or prev is None:
                 if now_seen:
