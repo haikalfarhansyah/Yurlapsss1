@@ -32,7 +32,7 @@ from typing import Optional
 
 from .config import default_data_dir
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -227,6 +227,10 @@ class ClubStore:
                 for column, definition in columns.items():
                     if column not in present:
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            # Presets created by 0.4.2 used 1 as the old default. The current
+            # contract starts the GO random delay at 2 seconds, so upgrade
+            # legacy rows before the stricter validator reads them.
+            conn.execute("UPDATE preset SET random_delay_max=2 WHERE random_delay_max IS NULL OR random_delay_max < 2")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_race_pending ON race(club_id, sync, status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_practice_pending ON practice_session(club_id, sync, started_at)")
             if conn.execute("SELECT COUNT(*) FROM track WHERE deleted=0 AND active=1").fetchone()[0] == 0:
