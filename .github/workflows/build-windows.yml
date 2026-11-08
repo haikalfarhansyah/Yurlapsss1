@@ -188,26 +188,22 @@ jobs:
           cp staging/bin/YurLapsDecoder.exe ../decoder-out/
           find staging -type f -iname '*.dll' -exec cp '{}' ../decoder-out/ \;
           cp /mingw64/lib/libfec.dll ../decoder-out/
-          # ntldd bisa tidak ada / gagal di lingkungan MSYS2 tertentu; kalau
-          # begitu, salin DLL yang pasti dibutuhkan dari /mingw64/bin.
-          DLLS=""
-          if command -v ntldd >/dev/null 2>&1; then
-            DLLS=$(ntldd -R ../decoder-out/YurLapsDecoder.exe 2>/dev/null \
-                   | grep -i mingw64 | awk '{print $3}' | tr -d '<>' | sort -u || true)
-          fi
-          if [ -z "$DLLS" ]; then
-            echo "ntldd tidak tersedia - memakai daftar DLL tetap"
-            DLLS="libzmq.dll libsodium.dll libusb-1.0.dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll"
-          fi
-          for dll in $DLLS; do
-            if [ -f "/mingw64/bin/$dll" ]; then
-              cp "/mingw64/bin/$dll" ../decoder-out/
-            elif [ -f "$dll" ]; then
-              cp "$dll" ../decoder-out/
-            else
-              echo "GAGAL: DLL tidak ditemukan: $dll"; exit 1
+          # Paket MSYS2 memberi beberapa DLL dengan suffix ABI/version
+          # (contoh: libsodium-26.dll), jadi jangan mencari nama exact.
+          copy_dll() {
+            pattern="$1"
+            matches=(/mingw64/bin/$pattern)
+            if [ ! -e "${matches[0]}" ]; then
+              echo "GAGAL: DLL tidak ditemukan: $pattern"; exit 1
             fi
-          done
+            cp "${matches[@]}" ../decoder-out/
+          }
+          copy_dll 'libzmq*.dll'
+          copy_dll 'libsodium*.dll'
+          copy_dll 'libusb-1.0*.dll'
+          copy_dll 'libgcc_s_seh-1.dll'
+          copy_dll 'libstdc++-6.dll'
+          copy_dll 'libwinpthread-1.dll'
           cp "$GITHUB_WORKSPACE/decoder/ATTRIBUTION.txt" ../decoder-out/
           echo "isi paket decoder:"; ls -la ../decoder-out
 
