@@ -448,7 +448,7 @@ def make_handler(ctx: AppContext):
                         "announce_driver", "announce_position_change", "announce_best_lap",
                         "announce_position_mode", "announce_lap", "announce_best_lap_mode",
                         "announce_best_lap_every", "announce_last_lap", "announce_finish",
-                        "tts_rate", "tts_voice", "tts_language", "beep_volume")
+                        "tts_rate", "tts_voice", "tts_language", "beep_volume", "beep_duration_ms")
                 return self._json({"ok": True, "settings": {k: getattr(cfg, k) for k in keys}})
 
             # ---------------- Quick Race (offline) ----------------
@@ -882,7 +882,7 @@ def make_handler(ctx: AppContext):
                     "announce_best_lap_mode": str,
                     "announce_best_lap": bool, "announce_best_lap_every": int,
                     "announce_last_lap": bool, "announce_finish": bool,
-                    "tts_rate": float, "tts_voice": str, "tts_language": str,
+                    "tts_rate": float, "tts_voice": str, "tts_language": str, "beep_duration_ms": int,
                     "manage_decoder": bool, "decoder_exe": str,
                     "decoder_args": str, "decoder_auto_download": bool,
                     "decoder_gain": float, "decoder_bias_tee": bool,
@@ -897,7 +897,7 @@ def make_handler(ctx: AppContext):
                 }
                 import math
                 updates = {}
-                ranges = {"idle_split_seconds": (1, 86400), "beep_volume": (0, 1),
+                ranges = {"idle_split_seconds": (1, 86400), "beep_volume": (0, 1), "beep_duration_ms": (20, 300),
                           "tts_rate": (.5, 2), "announce_best_lap_every": (1, 10000),
                           "decoder_gain": (0, 49.6)}
                 modes = {"announce_position_mode": ("off", "passing", "changed"),

@@ -136,6 +136,16 @@ class SupabaseRaceClient:
             raise UploadError("Server belum mengonfirmasi practice")
         return receipt["id"]
 
+    def fetch_races(self, club_id: str, limit: int = 500) -> list[dict]:
+        """Read the club's shared race history for a newly logged-in laptop."""
+        query = urllib.parse.urlencode({
+            "club_id": "eq." + str(uuid.UUID(club_id)),
+            "select": "id,club_id,name,track_name,raced_at,results,source_race_id,session_data",
+            "order": "raced_at.desc", "limit": str(limit),
+        })
+        rows = self._request("/rest/v1/races?" + query, "GET")
+        return rows if isinstance(rows, list) else []
+
     def delete_race(self, club_id: str, race_id: str) -> None:
         query = urllib.parse.urlencode({"id": "eq." + str(uuid.UUID(race_id)),
                                          "club_id": "eq." + str(uuid.UUID(club_id))})

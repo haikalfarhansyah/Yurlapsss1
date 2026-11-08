@@ -711,6 +711,7 @@
             <div class="field"><label for="soundVoice">Voice perangkat</label><select id="soundVoice"></select></div>
             <div class="field"><label for="soundRate">Kecepatan bicara</label><input id="soundRate" type="number" min="0.5" max="2" step="0.1" value="1"></div>
             <div class="field"><label for="soundVolume">Volume beep dan horn</label><input id="soundVolume" type="range" min="0.1" max="1" step="0.1" value="0.6"></div>
+            <div class="field"><label for="soundBeepMs">Durasi beep passing (ms)</label><input id="soundBeepMs" type="number" min="20" max="300" step="10" value="80"><p class="note">Karakter suara square-wave seperti buzzer 5V. Setiap passing tetap menghasilkan satu beep.</p></div>
           </div>
           <button class="btn primary" id="soundTest" type="button">Tes suara</button>
         </div>
@@ -803,8 +804,9 @@
     <div class="preset-manager"><select id="editPresetSelect" aria-label="Pilih preset yang diatur"></select><button class="btn sm" id="presetNew" type="button">+ Baru</button><button class="btn sm" id="presetDuplicate" type="button">Duplikat</button><button class="btn sm danger" id="presetDelete" type="button">Hapus</button></div>
     <div class="field"><label for="setName">Nama preset</label><input id="setName" required maxlength="100" placeholder="Nama format race"></div>
     <div class="two">
-      <div class="field"><label for="setCd">Countdown (detik)</label><input id="setCd" type="number" min="1" max="60" step="1" required><p class="note">Hitungan suara sebelum GO: lima, empat, tiga, dua, satu.</p></div>
-      <div class="field"><label for="setRandom">Random delay maksimum (detik)</label><input id="setRandom" type="number" min="1" max="3" step="1" required><p class="note">Jeda dari hitungan satu ke GO diacak antara 1 dan nilai ini. Nilai 1 berarti tepat 1 detik.</p></div>
+      <div class="field"><label for="setCd">Countdown (angka)</label><input id="setCd" type="number" min="1" max="60" step="1" required><p class="note">Jumlah ketukan suara sebelum GO: lima, empat, tiga, dua, satu.</p></div>
+      <div class="field"><label for="setCountdownStep">Jeda antar angka (detik)</label><input id="setCountdownStep" type="number" min="1" max="3" step="0.1" value="1.5" required><p class="note">Default 1,5 detik agar suara selesai sebelum angka berikutnya.</p></div>
+      <div class="field"><label for="setRandom">Random delay maksimum (detik)</label><input id="setRandom" type="number" min="2" max="4" step="1" required><p class="note">Jeda dari hitungan satu ke GO diacak mulai 2 detik. Nilai 3 berarti 2–3 detik; nilai 4 berarti 2–4 detik.</p></div>
     </div>
     <div class="two">
       <div class="field"><label>Target</label><div class="chipsel" id="setTarget"><button type="button" data-v="laps">Lap</button><button type="button" data-v="time">Waktu</button></div><p class="note">Setiap driver harus mencapai targetnya sendiri. Sesi selesai setelah seluruh peserta finish atau dihentikan operator.</p></div>

@@ -3,7 +3,7 @@
 RANKS = {"position", "result", "lapsTime", "best", "top3", "consecutive"}
 DEFAULTS = {"name": "Quick Race", "target": "time", "value": 180,
             "rank": "position", "start_mode": "grid", "cd": 5, "sound": 1,
-            "random_delay_max": 1, "target_time_ms": 180000,
+            "countdown_step_ms": 1500, "random_delay_max": 2, "target_time_ms": 180000,
             "finish_current_lap": False, "stagger_mode": "manual",
             "stagger_gap_ms": 10000}
 
@@ -52,7 +52,12 @@ def normalize(data, base=None):
         result["rank"] = "result"
     result["value"] = _integer(result["value"], "Target", 1, 86400)
     result["cd"] = _integer(result["cd"], "Countdown", 0, 60)
-    result["random_delay_max"] = _integer(result["random_delay_max"], "Random delay", 1, 3)
+    result["countdown_step_ms"] = _integer(result["countdown_step_ms"], "Jeda countdown (ms)", 1000, 3000)
+    # Presets created before the 2-second minimum used 1 as the legacy
+    # default. Upgrade that value transparently when the preset is loaded.
+    if "random_delay_max" not in incoming and result.get("random_delay_max") in (None, "", 1, "1"):
+        result["random_delay_max"] = 2
+    result["random_delay_max"] = _integer(result["random_delay_max"], "Random delay maksimum", 2, 4)
     result["stagger_gap_ms"] = _integer(result["stagger_gap_ms"], "Jeda panggilan (ms)", 1000, 600000)
     result["stagger_mode"] = "manual" if result["stagger_mode"] == "passing" else result["stagger_mode"]
     if result["stagger_mode"] not in ("manual", "auto"):

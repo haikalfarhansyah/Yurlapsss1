@@ -249,6 +249,15 @@ class CloudService:
                                 action()
                             except Exception as exc:
                                 errors.append(str(exc))
+                        try:
+                            # Pull shared race history as well as pushing local
+                            # results. This makes a second logged-in laptop
+                            # converge on the same History list.
+                            remote_rows = client.fetch_races(club["id"])
+                            store.import_remote_races(remote_rows, club["id"])
+                            store.remove_missing_remote_races({str(r.get("id")) for r in remote_rows if r.get("id")}, club["id"])
+                        except Exception as exc:
+                            errors.append(str(exc))
                         if self.can_refresh(path):
                             refresh_members(store, club["id"], client)
                             refresh_visiting_drivers(store, club["id"], client)

@@ -207,13 +207,13 @@ class OfflineRaceTests(unittest.TestCase):
         self.race.set_cfg({'cd':3,'random_delay_max':3})
         with patch('app.race.time.monotonic',return_value=100),patch('app.race.random.uniform',return_value=2.5):
             self.race.observe_clock(10000);self.race.mulai()
-        for wall,ts,value in [(101,11000,2),(102,12000,1),(104,14000,1)]:
+        for wall,ts,value in [(101,11000,3),(102,12000,2),(103,13000,1),(104,14000,1)]:
             with patch('app.race.time.monotonic',return_value=wall):
                 self.race.observe_clock(ts);self.race.cek_waktu()
                 self.assertEqual(self.race.status,'countdown')
                 self.assertEqual(self.race.snapshot()['countdown_value'],value)
-        with patch('app.race.time.monotonic',return_value=104.5):
-            self.race.observe_clock(14500);self.race.cek_waktu()
+        with patch('app.race.time.monotonic',return_value=105.5):
+            self.race.observe_clock(15500);self.race.cek_waktu()
             self.assertEqual(self.race.status,'live')
         self.assertEqual([e['value'] for e in self.race.events if e['kind']=='countdown'],[3,2,1])
 
@@ -273,7 +273,7 @@ class OfflineRaceTests(unittest.TestCase):
         self.assertEqual(normalize({'start_mode':'grid'})['rank'],'position')
         self.assertEqual(normalize({'start_mode':'staggered'})['rank'],'result')
         self.assertEqual(normalize({'target':'time','value':95})['target_time_ms'],95000)
-        for data in ({'value':0},{'value':1.5},{'random_delay_max':4},{'stagger_gap_ms':100}):
+        for data in ({'value':0},{'value':1.5},{'random_delay_max':1},{'random_delay_max':5},{'stagger_gap_ms':100}):
             with self.assertRaises(ValueError):normalize(data)
 
     def test_v1_database_migration_preserves_members_and_does_not_invent_loop_width(self):

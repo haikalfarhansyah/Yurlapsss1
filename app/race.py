@@ -238,8 +238,9 @@ class RaceEngine:
             self.mulai_wall = time.time()
             self._countdown_started = time.monotonic()
             cd = self.cfg["cd"]
-            delay = random.uniform(1, self.cfg["random_delay_max"]) if cd else 0
-            self._go_due = self._countdown_started + max(0, cd - 1) + delay
+            delay = random.uniform(2, self.cfg["random_delay_max"]) if cd else 0
+            step = self.cfg.get("countdown_step_ms", 1500) / 1000.0
+            self._go_due = self._countdown_started + max(0, cd - 1) * step + delay
             self._countdown_tick()
             return self.snapshot()
 
@@ -247,7 +248,8 @@ class RaceEngine:
         if self.status != "countdown":
             return
         now = time.monotonic()
-        value = max(1, self.cfg["cd"] - int(now - self._countdown_started)) if self.cfg["cd"] else 0
+        step = self.cfg.get("countdown_step_ms", 1500) / 1000.0
+        value = max(1, self.cfg["cd"] - int((now - self._countdown_started) / step)) if self.cfg["cd"] else 0
         if value and value != self._last_countdown:
             self._last_countdown = value
             self._event("countdown", value=value)
@@ -320,6 +322,12 @@ class RaceEngine:
                 return reject("Peserta sudah finish", "finished")
             if self.status != "live":
                 return reject("Timing dijeda" if self.status == "paused" else "Sesi tidak berjalan")
+            # A race may be started before the decoder has emitted its first
+            # clock packet. Anchor the shared race clock to the first valid
+            # passing instead of comparing an integer with None (which used
+            # to abort the decoder callback and make the UI appear frozen).
+            if self.start_decoder_ts is None:
+                self.start_decoder_ts = decoder_ts
             if decoder_ts < self.start_decoder_ts:
                 return reject("Lintasan sebelum GO")
             if (self.cfg["target"] == "time" and self.cfg["start_mode"] == "grid"

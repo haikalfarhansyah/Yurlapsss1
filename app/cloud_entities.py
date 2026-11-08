@@ -12,6 +12,7 @@ KINDS = {
                              "min_lap_ms": "min_lap_ms", "active": "is_active"}),
     "preset": ("club_presets", {"name": "name", "target": "target", "value": "value",
                                 "rank": "rank", "start_mode": "start_mode", "cd": "cd", "sound": "sound",
+                                "countdown_step_ms": "countdown_step_ms",
                                 "random_delay_max": "random_delay_max", "target_time_ms": "target_time_ms",
                                 "finish_current_lap": "finish_current_lap", "stagger_mode": "stagger_mode",
                                 "stagger_gap_ms": "stagger_gap_ms"}),

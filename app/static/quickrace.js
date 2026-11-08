@@ -576,7 +576,7 @@ function presetConfig(p){
   return {name:v.name||v.nama||'Quick Race',target:v.target||'laps',value:v.value||10,
     target_time_ms:v.target_time_ms||(v.target==='time'?(v.value||180)*1000:null),
     rank:v.rank==='lapsTime'?'result':(v.rank||(v.start_mode==='staggered'?'result':'position')),
-    start_mode:v.start_mode||'grid',cd:v.cd||5,random_delay_max:v.random_delay_max||1,
+    start_mode:v.start_mode||'grid',cd:v.cd||5,countdown_step_ms:v.countdown_step_ms||1500,random_delay_max:Math.max(2,v.random_delay_max||2),
     finish_current_lap:!!v.finish_current_lap,stagger_mode:v.stagger_mode==='auto'?'auto':'manual',
     stagger_gap_ms:v.stagger_gap_ms||10000,sound:v.sound===0?0:1};
 }
@@ -604,7 +604,7 @@ function fillPreset(p){
   const c=presetConfig(p);
   $('setName').value=c.name; pilihChip('setTarget',c.target); isiNilai(c.target,c.value);
   $('setRank').value=c.rank;$('setStart').value=c.start_mode;$('setCd').value=c.cd;
-  $('setRandom').value=c.random_delay_max;$('setFinishCurrent').checked=c.finish_current_lap;
+  $('setRandom').value=c.random_delay_max;$('setCountdownStep').value=(c.countdown_step_ms||1500)/1000;$('setFinishCurrent').checked=c.finish_current_lap;
   $('setStagger').value=c.stagger_mode;$('setStaggerGap').value=c.stagger_gap_ms/1000;
   presetExplanations();
 }
@@ -640,13 +640,14 @@ function readPresetForm(){
     if(!match){toast('Isi waktu dengan format menit:detik, misalnya 05:30');$('setValue').focus();return null;}
     value=Number(match[1])*60+Number(match[2]);
   }else value=Number(raw);
-  const cd=Number($('setCd').value),random=Number($('setRandom').value),gap=Number($('setStaggerGap').value);
+  const cd=Number($('setCd').value),step=Number($('setCountdownStep').value),random=Number($('setRandom').value),gap=Number($('setStaggerGap').value);
   if(!Number.isInteger(value)||value<1){toast('Target harus lebih dari nol');return null;}
   if(!Number.isInteger(cd)||cd<1||cd>60){toast('Countdown harus 1 sampai 60 detik');return null;}
-  if(!Number.isInteger(random)||random<1||random>3){toast('Random delay maksimum harus 1 sampai 3 detik');return null;}
+  if(!Number.isFinite(step)||step<1||step>3){toast('Jeda countdown harus 1 sampai 3 detik');return null;}
+  if(!Number.isInteger(random)||random<2||random>4){toast('Random delay maksimum harus 2 sampai 4 detik');return null;}
   if(!Number.isFinite(gap)||gap<1){toast('Jeda panggilan minimal 1 detik');return null;}
   const name=$('setName').value.trim();if(!name){toast('Nama preset wajib diisi');return null;}
-  return {name,target,value,target_time_ms:target==='time'?value*1000:null,cd,random_delay_max:random,
+  return {name,target,value,target_time_ms:target==='time'?value*1000:null,cd,countdown_step_ms:Math.round(step*1000),random_delay_max:random,
     finish_current_lap:$('setFinishCurrent').checked,rank:$('setRank').value,start_mode:$('setStart').value,
     stagger_mode:$('setStagger').value,stagger_gap_ms:Math.round(gap*1000),sound:1};
 }

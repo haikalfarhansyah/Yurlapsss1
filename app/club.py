@@ -20,6 +20,7 @@ Aturan yang dipegang:
 from __future__ import annotations
 
 import json
+import datetime
 import functools
 import math
 import uuid
@@ -209,7 +210,8 @@ class ClubStore:
                 "race": {"club_id": "TEXT", "result_json": "TEXT"},
                 "preset": {"remote_revision": "INTEGER DEFAULT 0", "mutation_id": "TEXT",
                            "deleted": "INTEGER DEFAULT 0", "sync_error": "TEXT", "synced": "INTEGER DEFAULT 0",
-                           "random_delay_max": "INTEGER NOT NULL DEFAULT 1", "target_time_ms": "INTEGER",
+                           "countdown_step_ms": "INTEGER NOT NULL DEFAULT 1500",
+                           "random_delay_max": "INTEGER NOT NULL DEFAULT 2", "target_time_ms": "INTEGER",
                            "finish_current_lap": "INTEGER NOT NULL DEFAULT 0", "stagger_mode": "TEXT NOT NULL DEFAULT 'manual'",
                            "stagger_gap_ms": "INTEGER NOT NULL DEFAULT 10000"},
                 "member": {"source": "TEXT DEFAULT 'local'", "tts_name": "TEXT", "avatar_url": "TEXT",
@@ -488,6 +490,7 @@ class ClubStore:
         start, rank = cfg["start_mode"], cfg["rank"]
         cd, sound = cfg["cd"], int(cfg["sound"])
         random_delay_max = cfg["random_delay_max"]
+        countdown_step_ms = cfg["countdown_step_ms"]
         target_time_ms = cfg["target_time_ms"]
         finish_current_lap = int(cfg["finish_current_lap"])
         stagger_mode = cfg["stagger_mode"]
@@ -496,17 +499,17 @@ class ClubStore:
         if pid and self.preset(pid):
             self._conn.execute(
                 "UPDATE preset SET name=?, target=?, value=?, rank=?, start_mode=?,"
-                " cd=?, sound=?, random_delay_max=?, target_time_ms=?, finish_current_lap=?,"
+                " cd=?, sound=?, countdown_step_ms=?, random_delay_max=?, target_time_ms=?, finish_current_lap=?,"
                 " stagger_mode=?, stagger_gap_ms=?, updated_at=? WHERE id=?",
-                (nama, target, nilai, rank, start, cd, sound, random_delay_max, target_time_ms,
+                (nama, target, nilai, rank, start, cd, sound, countdown_step_ms, random_delay_max, target_time_ms,
                  finish_current_lap, stagger_mode, stagger_gap_ms, now, pid))
         else:
             pid = pid or str(uuid.uuid4())
             self._conn.execute(
                 "INSERT INTO preset (id, name, target, value, rank, start_mode, cd,"
-                " sound, random_delay_max, target_time_ms, finish_current_lap, stagger_mode, stagger_gap_ms, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (pid, nama, target, nilai, rank, start, cd, sound, random_delay_max, target_time_ms,
+                " sound, countdown_step_ms, random_delay_max, target_time_ms, finish_current_lap, stagger_mode, stagger_gap_ms, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, nama, target, nilai, rank, start, cd, sound, countdown_step_ms, random_delay_max, target_time_ms,
                  finish_current_lap, stagger_mode, stagger_gap_ms, now))
         self._conn.execute("UPDATE preset SET synced=0, mutation_id=?, sync_error=NULL WHERE id=?",
                            (str(uuid.uuid4()), pid))
@@ -695,6 +698,73 @@ class ClubStore:
         from .race_results import result_rows
         d["drivers"] = result_rows(d["drivers"], d["cfg"])
         return d
+
+    @locked
+    def import_remote_races(self, rows: list[dict], club_id: str) -> int:
+        """Merge shared races from Supabase without replacing local pending work."""
+        imported = 0
+        for remote in rows or []:
+            rid = str(remote.get("source_race_id") or remote.get("id") or "").strip()
+            if not rid:
+                continue
+            old = self._conn.execute("SELECT sync, remote_id FROM race WHERE id=?", (rid,)).fetchone()
+            if old and old["sync"] != "terkirim":
+                # A local/offline result always wins until its upload is acknowledged.
+                continue
+            session = remote.get("session_data") or {}
+            results = remote.get("results") or []
+            drivers = []
+            for i, row in enumerate(results, 1):
+                laps = list(row.get("laps_ms") or row.get("laps") or [])
+                drivers.append({
+                    "uid": row.get("uid") or str(uuid.uuid4()),
+                    "no": row.get("no") or i, "name": row.get("name") or row.get("driver") or "",
+                    "nick": row.get("nickname") or "", "kelas": row.get("class") or row.get("kelas") or "",
+                    "account_id": row.get("user_id") or row.get("driver_id"),
+                    "member_id": row.get("user_id") or row.get("driver_id"),
+                    "transponder": row.get("transponder") if row.get("transponder") is not None else -i, "laps": laps,
+                    "passings": row.get("passings") or [], "pos": row.get("position"),
+                    "best_ms": row.get("best_ms"), "top3_ms": row.get("top3_ms"),
+                    "consecutive_ms": row.get("consecutive_ms"), "p80_ms": row.get("p80_ms"),
+                    "consistency": row.get("consistency"), "top_speed_kmh": row.get("top_speed_kmh"),
+                    "average_speed_kmh": row.get("average_speed_kmh"),
+                })
+            raced_at = remote.get("raced_at")
+            try:
+                started = datetime.datetime.fromisoformat(str(raced_at).replace("Z", "+00:00")).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                started = time.time()
+            data = {
+                "id": rid, "club_id": club_id, "remote_id": remote.get("id"),
+                "name": remote.get("name") or "Race", "track_id": session.get("track_id"),
+                "track_name": remote.get("track_name") or "", "started_at": started,
+                "ended_at": session.get("ended_at") or started, "status": "saved", "sync": "terkirim",
+                "cfg": session.get("configuration") or {}, "loop_width_m": session.get("loop_width_m"),
+                "start_decoder_ts": session.get("start_decoder_ts"), "end_decoder_ts": session.get("end_decoder_ts"),
+                "finish_reason": session.get("finish_reason"), "timing_interrupted": session.get("timing_interrupted"),
+                "drivers": drivers, "log": [],
+            }
+            self.simpan_race(data)
+            self._conn.execute("UPDATE race SET sync='terkirim', remote_id=?, club_id=? WHERE id=?",
+                               (remote.get("id"), club_id, rid))
+            imported += 1
+        self._conn.commit()
+        return imported
+
+    @locked
+    def remove_missing_remote_races(self, remote_ids: set[str], club_id: str) -> int:
+        """Reflect deletions made by another logged-in application."""
+        rows = self._conn.execute(
+            "SELECT id, remote_id FROM race WHERE club_id=? AND sync='terkirim' AND remote_id IS NOT NULL",
+            (club_id,)).fetchall()
+        removed = 0
+        for row in rows:
+            if row["remote_id"] not in remote_ids:
+                self._conn.execute("DELETE FROM race WHERE id=?", (row["id"],))
+                removed += 1
+        if removed:
+            self._conn.commit()
+        return removed
 
     @locked
     def tandai_terkirim(self, rid: str, remote_id: Optional[str] = None) -> bool:

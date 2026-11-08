@@ -118,6 +118,7 @@ class Config:
     beep_on_lap: bool = True
     announce_lap_times: bool = True   # suara "lap 12, 8 detik 45"
     beep_volume: float = 0.6
+    beep_duration_ms: int = 80
     # Race audio policy.  Browser/desktop presentation reads these values;
     # timing itself remains independent from audio availability.
     sound_passing: bool = True

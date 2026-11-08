@@ -7,7 +7,7 @@ const queue=[];
 let speaking=false,audio=null,hornAudio=null,sessionId=null,lastEvent=0,pendingBest=null,pollBusy=false;
 let settings={sound_passing:true,sound_ignore:true,sound_countdown:true,announce_driver:false,
   announce_position_mode:'off',announce_lap:false,announce_best_lap_mode:'off',announce_best_lap_every:3,
-  announce_last_lap:false,announce_finish:true,tts_rate:1,tts_voice:'',tts_language:'id-ID',beep_volume:.6,
+  announce_last_lap:false,announce_finish:true,tts_rate:1,tts_voice:'',tts_language:'id-ID',beep_volume:.6,beep_duration_ms:80,
   horn_enabled:true,horn_file:'builtin'};
 function audioContext(){
   const AC=window.AudioContext||window.webkitAudioContext;
@@ -34,12 +34,14 @@ function countdownTone(value){
   // speech synthesis is busy. The spoken number remains queued separately.
   const ctx=audioContext();if(!ctx)return;
   const now=ctx.currentTime,osc=ctx.createOscillator(),gain=ctx.createGain();
-  osc.type='sine';osc.frequency.setValueAtTime(650+Number(value)*28,now);
+  osc.type='sine';
+  if(osc.frequency.setValueAtTime)osc.frequency.setValueAtTime(650+Number(value)*28,now);
+  else osc.frequency.value=650+Number(value)*28;
   gain.gain.setValueAtTime(Math.max(.01,settings.beep_volume*.28),now);
   gain.gain.exponentialRampToValueAtTime(.001,now+.12);
   osc.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.12);
 }
-function beep(ignore){tone(ignore?520:1450,ignore?.12:.07,ignore?'sawtooth':'square',settings.beep_volume*(ignore?.45:.8));}
+function beep(ignore){const duration=Math.max(.02,Math.min(.3,Number(settings.beep_duration_ms||80)/1000));tone(ignore?520:1450,duration,'square',settings.beep_volume*(ignore?.45:.8));}
 function horn(){
   tone(440,.45,'sawtooth',settings.beep_volume*.35);
   tone(554,.45,'sawtooth',settings.beep_volume*.25);
@@ -129,6 +131,7 @@ function renderSettings(){
   $('soundBestMode').value=settings.announce_best_lap_mode;
   $('soundBestEvery').value=settings.announce_best_lap_every;
   $('soundRate').value=settings.tts_rate;$('soundLanguage').value=settings.tts_language;$('soundVolume').value=settings.beep_volume;
+  $('soundBeepMs').value=settings.beep_duration_ms||80;
   $('hornEnabled').checked=!!settings.horn_enabled;
   $('hornFileName').textContent=settings.horn_file==='custom'?'Horn MP3 kustom tersimpan':'Horn bawaan YurLaps';
   refreshVoices();formState();
@@ -145,19 +148,19 @@ async function load(){
 let saveChain=Promise.resolve();
 function save(){
   formState();
-  const n=Number($('soundBestEvery').value),rate=Number($('soundRate').value),volume=Number($('soundVolume').value);
-  if(!Number.isInteger(n)||n<1||n>999||!Number.isFinite(rate)||rate<.5||rate>2){$('soundSaved').textContent='Periksa interval dan kecepatan suara';return;}
+  const n=Number($('soundBestEvery').value),rate=Number($('soundRate').value),volume=Number($('soundVolume').value),beepMs=Number($('soundBeepMs').value);
+  if(!Number.isInteger(n)||n<1||n>999||!Number.isFinite(rate)||rate<.5||rate>2||!Number.isInteger(beepMs)||beepMs<20||beepMs>300){$('soundSaved').textContent='Periksa interval, durasi beep, dan kecepatan suara';return;}
   const body={sound_passing:true,sound_ignore:true,sound_countdown:$('soundCountdown').checked,
     horn_enabled:$('hornEnabled').checked,horn_file:settings.horn_file,
     announce_driver:$('soundDriver').checked,announce_position_mode:$('soundPositionMode').value,
     announce_position_change:$('soundPositionMode').value==='changed',announce_lap:$('soundLap').checked,
     announce_best_lap_mode:$('soundBestMode').value,announce_best_lap:$('soundBestMode').value!=='off',
     announce_best_lap_every:n,announce_last_lap:$('soundLastLap').checked,announce_finish:$('soundFinish').checked,
-    tts_rate:rate,tts_voice:$('soundVoice').value,tts_language:$('soundLanguage').value,beep_volume:volume};
+    tts_rate:rate,tts_voice:$('soundVoice').value,tts_language:$('soundLanguage').value,beep_volume:volume,beep_duration_ms:beepMs};
   $('soundSaved').textContent='menyimpan…';
   saveChain=saveChain.then(async()=>{try{await api('/api/settings',body);settings={...settings,...body};pendingBest=null;$('soundSaved').textContent='tersimpan';}catch(e){$('soundSaved').textContent='Gagal: '+e.message;}});
 }
-['soundCountdown','hornEnabled','soundDriver','soundPositionMode','soundLap','soundBestMode','soundLastLap','soundFinish','soundBestEvery','soundLanguage','soundRate','soundVoice','soundVolume'].forEach(id=>$(id).addEventListener('change',save));
+['soundCountdown','hornEnabled','soundDriver','soundPositionMode','soundLap','soundBestMode','soundLastLap','soundFinish','soundBestEvery','soundLanguage','soundRate','soundVoice','soundVolume','soundBeepMs'].forEach(id=>$(id).addEventListener('change',save));
 $('soundTest').addEventListener('click',()=>{beep(false);playHorn();say('Tes suara YurLaps');});
 $('hornBuiltin').addEventListener('click',()=>{settings.horn_file='builtin';save();renderSettings();});
 $('hornFile').addEventListener('change',async()=>{
