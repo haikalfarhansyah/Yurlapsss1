@@ -88,6 +88,7 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
+          suppress-deprecation-warnings: msystem-mingw64
           update: false
           cache: true
           install: >-
@@ -97,7 +98,6 @@ jobs:
             mingw-w64-x86_64-zeromq
             mingw-w64-x86_64-cppzmq
             mingw-w64-x86_64-libusb
-            mingw-w64-x86_64-ntldd
             git
             make
             autoconf
