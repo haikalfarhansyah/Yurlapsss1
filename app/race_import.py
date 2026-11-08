@@ -52,7 +52,11 @@ def import_lapbeeps(store, document, track_id):
         # negative, clearly synthetic ID so imported PDF data can never be
         # mistaken for a real transponder or linked account.
         synthetic_tp = -no if transponder is None else transponder
-        member = store.member_for_transponder(transponder) if transponder and full_laps else None
+        status = str(item.get('result_status') or ('FIN' if full_laps else 'DNS')).upper()
+        if status not in ('FIN', 'DNF', 'DNS'):
+            status = 'FIN' if full_laps else 'DNS'
+        # DNS has no race participation and stays out of personal history.
+        member = store.member_for_transponder(transponder) if transponder and full_laps and status != 'DNS' else None
         account_id = (member or {}).get('id') if member else None
         rows.append({'uid': str(uuid.uuid5(uuid.UUID(rid), str(no))), 'no': no,
                      'name': (member or {}).get('name') or driver,
@@ -63,7 +67,7 @@ def import_lapbeeps(store, document, track_id):
                      'first_decoder_ts': origin,
                      'last_decoder_ts': crossing if laps else None,
                      'last_race_crossing_ts': crossing if laps else None,
-                     'result_status': 'FIN' if full_laps else 'DNS',
+                     'result_status': status,
                      '_synthetic_transponder': synthetic_tp})
     cfg = {'name': name, 'start_mode': 'grid', 'rank': 'position', 'target': 'laps',
            'value': max(len(d['laps']) for d in rows), 'lap_storage_version': 2}
