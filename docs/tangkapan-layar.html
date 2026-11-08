@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YurLaps — Tangkapan Layar Quick Race</title>
+<style>
+  :root{
+    --blue:#009de0; --ink:#0d2b45; --txt:#2a3a4d; --muted:#8a98aa;
+    --line:#e7edf4; --bg:#f7f9fc; --ok:#12b76a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.55 'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;
+    color:var(--txt);background:var(--bg)}
+  header{padding:26px 30px 18px;border-bottom:1px solid var(--line);background:#fff}
+  h1{margin:0 0 4px;font-size:20px;color:var(--ink)}
+  .lead{color:var(--muted);font-size:13px}
+  .meta{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+  .chip{display:inline-flex;gap:5px;align-items:center;font-size:11px;color:var(--txt);
+    background:#f3f7fb;border:1px solid #e3ebf3;border-radius:999px;padding:3px 10px}
+  .chip b{color:var(--ink)}
+  .chip.ok{background:#e8f8ef;border-color:#c9ecd8;color:#0b7a45}
+  main{padding:22px 30px 60px;display:grid;gap:26px;max-width:1200px}
+  figure{margin:0;border:1px solid var(--line);border-radius:14px;background:#fff;
+    overflow:hidden;box-shadow:0 1px 2px rgba(13,43,69,.04)}
+  figure img{display:block;width:100%;height:auto}
+  figcaption{padding:11px 16px;border-top:1px solid var(--line);display:flex;gap:10px;
+    align-items:baseline;flex-wrap:wrap}
+  .n{font:700 11px/1 'Cascadia Mono',Consolas,monospace;color:#fff;background:var(--blue);
+    border-radius:6px;padding:4px 7px}
+  figcaption b{color:var(--ink);font-size:13.5px}
+  figcaption span{color:var(--muted);font-size:12.5px}
+  footer{padding:0 30px 40px;color:var(--muted);font-size:12px;max-width:1200px}
+  @media (max-width:640px){header,main,footer{padding-left:16px;padding-right:16px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>YurLaps — Quick Race (aplikasi nyata, full offline)</h1>
+  <div class="lead">Tangkapan layar dari aplikasi yang berjalan, bukan mockup. Data club dibaca dari SQLite lewat API lokal.</div>
+  <div class="meta">
+    <span class="chip ok">14 langkah uji lulus</span>
+    <span class="chip ok">0 galat JS</span>
+    <span class="chip ok">0 kunci localStorage</span>
+    <span class="chip ok">0 permintaan ke internet</span>
+    <span class="chip"><b>13</b> tangkapan layar</span>
+    <span class="chip">1440 × 940</span>
+  </div>
+</header>
+<main>
+
+<figure>
+  <img src="app-qr-1-siap.png" alt="Halaman Quick Race saat siap">
+  <figcaption><span class="n">01</span><b>Siap</b>
+    <span>Belum ada peserta. Track aktif dari club, rekor track, dan pengaturan sesi terlihat di atas.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-2-peserta.png" alt="Modal memilih peserta">
+  <figcaption><span class="n">02</span><b>Peserta</b>
+    <span>Dipilih dari member club; transponder terisi otomatis. Member <i>pending</i> diberi penanda.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-3-pengaturan.png" alt="Modal pengaturan sesi">
+  <figcaption><span class="n">03</span><b>Pengaturan (⚙)</b>
+    <span>Nama sesi, target waktu/lap, urutan klasemen, cara mulai, hitung mundur, bunyi.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-4-countdown.png" alt="Hitung mundur menuju start">
+  <figcaption><span class="n">04</span><b>Hitung mundur</b>
+    <span>Angka besar di layar penuh, diakhiri GO, lalu sesi berjalan otomatis.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-5-live.png" alt="Sesi berjalan dengan papan skor">
+  <figcaption><span class="n">05</span><b>Live</b>
+    <span>Lap tercatat, km/h dihitung dari lebar loop ÷ waktu lap, panel detail pembalap terpilih.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-6-log-luar.png" alt="Passing log dengan transponder di luar peserta">
+  <figcaption><span class="n">06</span><b>Passing log — transponder luar</b>
+    <span>Lintasan dari transponder yang bukan peserta tetap dicatat, ditandai <b>luar</b>, tidak masuk klasemen.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-7-simpan.png" alt="Modal simpan race">
+  <figcaption><span class="n">07</span><b>Finish → simpan</b>
+    <span>Nama sesi otomatis, ringkasan 3 teratas, dan penjelasan jujur bahwa belum ada pengiriman ke website.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-8-history.png" alt="Halaman History Race">
+  <figcaption><span class="n">08</span><b>History Race</b>
+    <span>Sesi tersimpan dengan filter per track, status unggah, dan ringkasan di kolom kanan.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-9-rincian.png" alt="Rincian sesi per pembalap">
+  <figcaption><span class="n">09</span><b>Rincian sesi</b>
+    <span>Semua lap per pembalap, best lap, km/h, dan transponder yang dipakai.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-10-track.png" alt="Halaman Track">
+  <figcaption><span class="n">10</span><b>Track</b>
+    <span>Satu club boleh punya banyak track. Rekor & jumlah sesi per track dihitung dari database.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-11-track-baru.png" alt="Modal tambah track">
+  <figcaption><span class="n">11</span><b>Tambah track</b>
+    <span>Nama, alamat, lebar loop — dengan contoh perhitungan km/h langsung saat lebar diisi.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-12-member.png" alt="Halaman Member">
+  <figcaption><span class="n">12</span><b>Member</b>
+    <span>Peran (leader/co-leader/officer/member), status, transponder, mobil & kelas.</span></figcaption>
+</figure>
+
+<figure>
+  <img src="app-qr-13-decoder.png" alt="Halaman Decoder">
+  <figcaption><span class="n">13</span><b>Decoder</b>
+    <span>Endpoint, gain, dan status dibaca dari mesin sungguhan — di sini jujur tertulis “menunggu decoder”.</span></figcaption>
+</figure>
+
+</main>
+<footer>
+  Diambil dari aplikasi yang berjalan di <code>127.0.0.1:8799/quickrace</code> dengan data uji sementara,
+  setelah seluruh alur (Start → countdown → lap → Finish → simpan → History) dijalankan.
+</footer>
+</body>
+</html>

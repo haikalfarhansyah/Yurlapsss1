@@ -1181,8 +1181,16 @@ function renderAccount(){
   $('accountClub').value=accountData.selected_club||'';
   $('accountClub').disabled=!!sesi&&sesi.status!=='idle';$('menuLogout').disabled=!!sesi&&sesi.status!=='idle';
   $('accountClubHint').textContent=choices.length?'Member, track, dan hasil memakai club ini.':'Belum ada club yang dapat dikelola akun ini.';
+  const syncError=$('accountSyncError');
+  syncError.hidden=!logged || !accountData.error;
+  syncError.textContent=accountData.error ? 'Sinkronisasi: '+accountData.error : '';
+  $('menuSync').hidden=!logged;
   $('pill').classList.toggle('online',!!accountData.online); $('pill').classList.toggle('offline',!accountData.online);
-  $('pilltxt').textContent=logged ? (accountData.syncing?'Sinkronisasi…':(accountData.online?'Online · sinkronisasi otomatis':'Offline · data tersimpan lokal')) : 'Offline · login untuk sinkronisasi';
+  const pending = Number(accountData.pending_races||0) + Number(accountData.pending_practice||0) + Number(accountData.pending_tracks||0);
+  let syncText = logged ? (accountData.syncing?'Sinkronisasi…':(accountData.online?'Online · sinkronisasi otomatis':'Offline · data tersimpan lokal')) : 'Offline · login untuk sinkronisasi';
+  if(logged && !accountData.syncing && pending) syncText += ` · ${pending} menunggu`;
+  if(logged && accountData.error && !accountData.syncing) syncText += ' · periksa pesan';
+  $('pilltxt').textContent=syncText;
   $('pill').title=accountData.error||'';
 }
 async function refreshAccount(){
@@ -1199,6 +1207,13 @@ $('menuLogin').onclick=async()=>{
     else window.open(r.url,'_blank','noopener,noreferrer');
     toast('Halaman login dibuka di browser. Kembali ke aplikasi setelah berhasil.');
   }catch(e){$('loginError').textContent=e.message; $('modalLogin').hidden=false;}
+};
+$('menuSync').onclick=async()=>{
+  try{
+    await api('/api/cloud/sync',{});
+    toast('Sinkronisasi dimulai');
+    await refreshAccount();
+  }catch(e){gagal(e);}
 };
 $('loginCancel').onclick=()=> $('modalLogin').hidden=true;
 $('loginForm').onsubmit=async e=>{

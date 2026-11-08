@@ -216,8 +216,25 @@ class CloudService:
         with self.state_lock:
             state = {k: self.state.get(k) for k in ("user_id", "email", "name", "nickname", "avatar_url", "selected_club", "clubs")}
             state["login_required"] = bool(self.state.get("user_id") and not self.state.get("refresh_token"))
+        # Expose durable queue counts so a connected operator can tell
+        # whether the problem is authentication, transport, or pending data.
+        state.update(pending_races=0, pending_practice=0, pending_tracks=0)
+        try:
+            if state.get("user_id") and state.get("selected_club"):
+                from .club import ClubStore
+                store = ClubStore(self.database_path())
+                try:
+                    summary = store.ringkasan()
+                    state["pending_races"] = int(summary.get("belum_terkirim") or 0)
+                    state["pending_tracks"] = int(summary.get("track_belum_sinkron") or 0)
+                    state["pending_practice"] = len(store.practice_sessions(1000, pending_only=True))
+                finally:
+                    store.close()
+        except Exception:
+            # Status must remain available even while a cache is being migrated.
+            pass
         state.update(syncing=self.syncing, last_ok=self.last_ok, error=self.last_error,
-                     online=bool(self.last_ok and not self.last_error and time.time()-self.last_ok < 90),
+                     online=bool(self.last_ok and time.time()-self.last_ok < 90),
                      website=self.website)
         return state  # tokens never leave the Python process
 
@@ -227,9 +244,13 @@ class CloudService:
                 return
             self.syncing = True
             errors = []
+            network_ok = False
             try:
                 client = self._client()
                 clubs = self.leader_clubs(client, self.state["user_id"])
+                # Authentication and club discovery succeeded even if an
+                # optional history/metadata endpoint is unavailable.
+                network_ok = True
                 with self.state_lock:
                     self.state["clubs"] = clubs
                     self._save()
@@ -259,16 +280,21 @@ class CloudService:
                         except Exception as exc:
                             errors.append(str(exc))
                         if self.can_refresh(path):
-                            refresh_members(store, club["id"], client)
-                            refresh_visiting_drivers(store, club["id"], client)
-                            sync_entities(store, club["id"], client)
-                            store.set_club(name=club["name"], role="leader", synced_at=time.time())
+                            try:
+                                refresh_members(store, club["id"], client)
+                                refresh_visiting_drivers(store, club["id"], client)
+                                sync_entities(store, club["id"], client)
+                                store.set_club(name=club["name"], role="leader", synced_at=time.time())
+                            except Exception as exc:
+                                # Entity/member refresh must not hide successful
+                                # race/practice uploads from the operator.
+                                errors.append(str(exc))
                     except Exception as exc:
                         errors.append(str(exc))
                     finally:
                         store.close()
                 self.last_error = "; ".join(errors) or None
-                if not errors:
+                if network_ok:
                     self.last_ok = time.time()
             except Exception as exc:
                 self.last_error = str(exc)
