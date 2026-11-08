@@ -97,6 +97,7 @@ jobs:
             mingw-w64-x86_64-zeromq
             mingw-w64-x86_64-cppzmq
             mingw-w64-x86_64-libusb
+            mingw-w64-x86_64-ntldd
             git
             make
             autoconf
@@ -185,6 +186,8 @@ jobs:
           cd upstream
           mkdir -p ../decoder-out
           cp staging/bin/YurLapsDecoder.exe ../decoder-out/
+          find staging -type f -iname '*.dll' -exec cp '{}' ../decoder-out/ \;
+          cp /mingw64/lib/libfec.dll ../decoder-out/
           # ntldd bisa tidak ada / gagal di lingkungan MSYS2 tertentu; kalau
           # begitu, salin DLL yang pasti dibutuhkan dari /mingw64/bin.
           DLLS=""
@@ -202,24 +205,24 @@ jobs:
             elif [ -f "$dll" ]; then
               cp "$dll" ../decoder-out/
             else
-              echo "  (lewat) $dll"
+              echo "GAGAL: DLL tidak ditemukan: $dll"; exit 1
             fi
           done
           cp "$GITHUB_WORKSPACE/decoder/ATTRIBUTION.txt" ../decoder-out/
           echo "isi paket decoder:"; ls -la ../decoder-out
 
       - name: Uji decoder bisa dijalankan
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          set -eu
-          cd decoder-out
-          OUT=$(./YurLapsDecoder.exe --salah 2>&1 || true)
-          if printf '%s' "$OUT" | grep -q "Usage"; then
-            echo "OK: YurLapsDecoder berjalan"
-          else
-            echo "Keluaran decoder:"; printf '%s\n' "$OUT" | head -5
-            echo "GAGAL: decoder tidak mencetak Usage"; exit 1
-          fi
+          Set-Location decoder-out
+          # Test exactly the packaged DLLs, without MSYS2 satisfying omissions.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $output = (& .\YurLapsDecoder.exe --salah 2>&1 | Out-String)
+          if ($output -notmatch 'Usage') {
+            throw "Decoder paket gagal dijalankan: $output"
+          }
+          Write-Host "OK: decoder berjalan tanpa DLL dari MSYS2"
+          exit 0
 
       - name: Simpan decoder + sumber (kepatuhan GPL-3.0)
         shell: msys2 {0}

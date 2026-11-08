@@ -747,6 +747,7 @@ class ClubStore:
                 "start_decoder_ts": session.get("start_decoder_ts"), "end_decoder_ts": session.get("end_decoder_ts"),
                 "finish_reason": session.get("finish_reason"), "timing_interrupted": session.get("timing_interrupted"),
                 "drivers": drivers, "log": [],
+                "source": session.get("source"),
             }
             self.simpan_race(data)
             self._conn.execute("UPDATE race SET sync='terkirim', remote_id=?, club_id=? WHERE id=?",

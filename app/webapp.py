@@ -438,8 +438,12 @@ def make_handler(ctx: AppContext):
 
             if path == "/api/cloud/status":
                 from .cloud_entities import conflicts
-                with ctx.club.lock:
-                    pending = conflicts(ctx.club)
+                # Acquire context before store everywhere, including polling.
+                # Re-entering ctx.club while holding its lock inverts tick's order.
+                with ctx._club_lock:
+                    store = ctx.club
+                    with store.lock:
+                        pending = conflicts(store)
                 return self._json({"ok": True, "cloud": ctx.cloud.status(), "conflicts": pending})
 
             if path == "/api/sound/settings":
@@ -770,8 +774,10 @@ def make_handler(ctx: AppContext):
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
             if path == "/api/race/log/clear":
-                with ctx.race.lock:
-                    ctx.race.log.clear()
+                with ctx._club_lock:
+                    race = ctx.race
+                    with race.lock:
+                        race.log.clear()
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
 
             if path == "/api/races/delete":
@@ -784,6 +790,23 @@ def make_handler(ctx: AppContext):
                 if getattr(ctx, "cloud", None) is not None:
                     ctx.cloud.wake.set()
                 return self._json({"ok": True, "deleted": rid})
+
+            if path == "/api/races/import":
+                if not self._cloud_local():
+                    return self._err(403, "Impor hanya dari komputer YurLaps")
+                try:
+                    from .race_import import import_lapbeeps
+                    with ctx._club_lock:
+                        if ctx.race.status != "idle":
+                            raise ValueError("Selesaikan dan reset race sebelum impor")
+                        track = next((t for t in ctx.club.tracks() if t.get("active")), None)
+                        if not track:
+                            raise ValueError("Aktifkan track tujuan di menu Track")
+                        result = import_lapbeeps(ctx.club, data.get("document"), track["id"])
+                    ctx.cloud.wake.set()
+                    return self._json({"ok": True, **result})
+                except (ValueError, KeyError, TypeError) as exc:
+                    return self._err(400, str(exc))
 
             if path == "/api/race/upload":
                 rid = data.get("id") or ""

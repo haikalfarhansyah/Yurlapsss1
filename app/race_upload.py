@@ -84,6 +84,7 @@ def race_payload(race: dict, user_id: str) -> dict:
         "created_by": user_id,
         "source_race_id": race["id"],
         "session_data": {"schema_version": 2, "configuration": race.get("cfg", {}),
+                         "source": race.get("source"),
                          "track_id": race.get("track_id"),
                          "timing_interrupted": bool(race.get("timing_interrupted")),
                          "ended_at": race.get("ended_at"), "loop_width_m": race.get("loop_width_m"),

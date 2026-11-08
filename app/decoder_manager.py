@@ -247,6 +247,7 @@ class DecoderManager(threading.Thread):
 
     # ------------------------------------------------------------------
     def _start_process(self, exe: Path) -> bool:
+        exe = Path(exe).resolve()
         try:
             args = self.cfg.effective_decoder_args()
         except Exception:
@@ -373,6 +374,12 @@ class DecoderManager(threading.Thread):
                       message="Mencari biner decoder OpenStint …")
 
         while not self._stop_event.is_set():
+            if self._proc is None and self.engine.decoder_online:
+                self._publish(mode="external", state="running", running=True,
+                              message="Menerima data dari decoder eksternal.")
+                self._wait(RETRY_SECONDS)
+                continue
+            self.status.mode = "managed"
             exe = self.find_decoder()
 
             if exe is None:
@@ -416,6 +423,7 @@ class DecoderManager(threading.Thread):
                         running=False, pid=None,
                         state="waiting" if no_dongle else "error",
                         last_exit=f"keluar dengan kode {code}",
+                        last_error=f"Decoder keluar: {code} (0x{code & 0xffffffff:08X}). {tail}",
                         message=("Menunggu YurLaps Decoder dicolokkan …"
                                  if no_dongle else
                                  f"Decoder berhenti (kode {code}). "

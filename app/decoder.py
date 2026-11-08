@@ -12,6 +12,8 @@ Pesan dipisah spasi dan bertipe posisional, jadi parsing dibuat defensif
 from __future__ import annotations
 
 import threading
+import logging
+import traceback
 import time
 from typing import Callable, Optional
 
@@ -65,7 +67,7 @@ class DecoderClient(threading.Thread):
                 time.sleep(0.5)
                 continue
 
-            self._dispatch_message(msg)
+            self.process_message(msg)
 
         try:
             sock.close()
@@ -73,6 +75,32 @@ class DecoderClient(threading.Thread):
             pass
 
     # ------------------------------------------------------------------
+    def process_message(self, msg: str) -> bool:
+        """A failed callback must not terminate the only decoder subscriber.
+
+        Do not replay a partially processed crossing: that could count it twice.
+        Keep the traceback and expose the failure to the operator instead.
+        """
+        try:
+            self._dispatch_message(msg)
+            return True
+        except Exception as exc:
+            self._last_error = str(exc)
+            logging.getLogger(__name__).exception("Decoder processing failed")
+            try:
+                from .config import default_data_dir
+                folder = default_data_dir()
+                folder.mkdir(parents=True, exist_ok=True)
+                with (folder / 'receiver-errors.log').open('a', encoding='utf-8') as log:
+                    log.write(time.strftime('%Y-%m-%d %H:%M:%S') + '\n' + traceback.format_exc() + '\n')
+            except OSError:
+                pass
+            try:
+                self.engine.log("error", "Passing gagal diproses; periksa hasil sesi: " + str(exc))
+            except Exception:
+                pass
+            return False
+
     def _dispatch_message(self, msg: str) -> None:
         if not self._got_message:
             self._got_message = True

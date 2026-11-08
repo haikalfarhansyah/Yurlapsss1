@@ -1215,6 +1215,20 @@ $('menuSync').onclick=async()=>{
     await refreshAccount();
   }catch(e){gagal(e);}
 };
+$('importRace').onclick=()=>$('importRaceFile').click();
+$('importRaceFile').onchange=async e=>{
+  const file=e.target.files[0];if(!file)return;
+  try{
+    if(file.size>900000)throw Error('File impor terlalu besar');
+    const document=JSON.parse(await file.text());
+    const track=DATA.track.find(t=>t.active);
+    if(!track)throw Error('Aktifkan track tujuan di menu Track');
+    if(!confirm(`Impor ${document.name||'race'} ke club ${DATA.club.name}, track ${track.name}?\nTanggal: ${document.started_at}\nPassing pertama tiap driver dibuang. Nama dipertahankan; akun belum ditautkan.`))return;
+    const result=await api('/api/races/import',{document});
+    await renderHistory();
+    toast(result.already_imported?'Sesi ini sudah diimpor':'Hasil diimpor dan masuk antrean sinkronisasi otomatis');
+  }catch(err){gagal(err);}finally{e.target.value='';}
+};
 $('loginCancel').onclick=()=> $('modalLogin').hidden=true;
 $('loginForm').onsubmit=async e=>{
   e.preventDefault();if(accountBusy)return;accountBusy=true;$('loginSubmit').disabled=true;$('loginError').textContent='';
