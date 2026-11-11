@@ -230,6 +230,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: yurlaps-decoder
+          retention-days: 1
           path: |
             decoder-out/*
             yurlaps-decoder-src.zip
@@ -444,6 +445,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: YurLaps-Windows
+          retention-days: 3
           path: |
             ${{ steps.detect.outputs.root }}/dist-electron/*.exe
             ${{ steps.detect.outputs.root }}/dist-electron/*.zip
