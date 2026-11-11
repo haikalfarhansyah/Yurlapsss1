@@ -53,6 +53,7 @@ class CloudService:
         self.stopped = threading.Event()
         self.thread = None
         self.last_ok = None
+        self.connected = False
         self.last_error = None
         self.syncing = False
         self.login_server = None
@@ -80,12 +81,18 @@ class CloudService:
                 session = client._request("/auth/v1/token?grant_type=refresh_token", "POST",
                                           {"refresh_token": self.state["refresh_token"]})
             except UploadError as exc:
-                if exc.status in (400, 401, 403):
+                detail = str(exc).lower()
+                invalid_session = exc.status in (400, 401, 403) and any(marker in detail for marker in (
+                    "invalid refresh token", "invalid_refresh_token", "refresh token not found",
+                    "refresh_token_not_found", "refresh token has been revoked"))
+                if invalid_session:
                     with self.state_lock:
                         self.state.pop("access_token", None)
                         self.state.pop("refresh_token", None)
                         self._save()
                     raise UploadError("Sesi berakhir. Login lagi; data offline tetap tersimpan", 401) from exc
+                # A transient HTTP 400/401 from a proxy or service must not
+                # destroy the persisted session. Retry on the next sync tick.
                 raise
             if session.get("user", {}).get("id") != self.state["user_id"]:
                 raise UploadError("Akun sesi tidak cocok", 401)
@@ -148,6 +155,7 @@ class CloudService:
                               "selected_club": selected["id"], "clubs": clubs}
                 self._save()
             self.last_error = None
+            self.connected = False
             self.wake.set()
 
     def _migrate_unassigned_local_history(self, target: ClubStore, club_id: str) -> None:
@@ -203,6 +211,7 @@ class CloudService:
                 self.state = {}
                 self._save()
             self.last_ok = self.last_error = None
+            self.connected = False
         if old.get("access_token"):
             def revoke():
                 try:
@@ -234,7 +243,7 @@ class CloudService:
             # Status must remain available even while a cache is being migrated.
             pass
         state.update(syncing=self.syncing, last_ok=self.last_ok, error=self.last_error,
-                     online=bool(self.last_ok and time.time()-self.last_ok < 90),
+                     online=bool(self.connected and self.last_ok and time.time()-self.last_ok < 45),
                      website=self.website)
         return state  # tokens never leave the Python process
 
@@ -296,8 +305,10 @@ class CloudService:
                 self.last_error = "; ".join(errors) or None
                 if network_ok:
                     self.last_ok = time.time()
+                    self.connected = True
             except Exception as exc:
                 self.last_error = str(exc)
+                self.connected = False
             finally:
                 self.syncing = False
 

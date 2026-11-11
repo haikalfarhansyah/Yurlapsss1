@@ -429,6 +429,16 @@ class ClubStore:
         return bool(aliases)
 
     @locked
+    def delete_local_guest(self, member_id: str) -> bool:
+        """Remove an operator-created guest without touching cloud identities."""
+        row = self._conn.execute("SELECT source FROM member WHERE id=?", (member_id,)).fetchone()
+        if not row or row[0] != "local_guest":
+            return False
+        self._conn.execute("DELETE FROM member WHERE id=?", (member_id,))
+        self._conn.commit()
+        return True
+
+    @locked
     def delete_member(self, member_id: str) -> bool:
         """Delete only locally-created offline drivers.
 
@@ -448,9 +458,15 @@ class ClubStore:
         self._conn.commit()
 
     def observed_transponders(self):
-        return [row[0] for row in self._conn.execute(
+        recent = [row[0] for row in self._conn.execute(
             "SELECT transponder FROM observed_transponder WHERE observed_at>? ORDER BY observed_at DESC LIMIT 100",
             (time.time()-86400,))]
+        # An offline guest may reconnect days later. Keep its ID eligible for
+        # account lookup even after the observation window has elapsed.
+        guests = [str(tp) for row in self._conn.execute(
+            "SELECT transponder FROM member WHERE source='local_guest'")
+            for tp in json.loads(row[0] or "[]")]
+        return list(dict.fromkeys(recent + guests))
 
     def save_member(self, data, *, _commit=True, _source=None):
         with self.lock:

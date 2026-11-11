@@ -101,15 +101,22 @@ def refresh_visiting_drivers(store, club_id: str, client) -> int:
     observed = store.observed_transponders()
     if not observed:
         return 0
-    members = client._request("/rest/v1/rpc/desktop_resolve_drivers", "POST",
-                              {"p_club_id": club_id, "p_transponders": observed})
-    if not isinstance(members, list):
-        raise ValueError("Respons driver tamu tidak valid")
+    members = []
+    for start in range(0, len(observed), 100):
+        page = client._request("/rest/v1/rpc/desktop_resolve_drivers", "POST",
+                               {"p_club_id": club_id, "p_transponders": observed[start:start+100]})
+        if not isinstance(page, list):
+            raise ValueError("Respons driver tamu tidak valid")
+        members.extend(page)
+    by_account = {}
+    for item in members:
+        account = by_account.setdefault(item["id"], dict(item, transponder_details=[]))
+        account["transponder_details"].extend(item.get("transponder_details") or [])
     conn = store._conn
     with store.lock, conn:
         # Keep offline drivers; account-linked visitors refresh atomically.
         conn.execute("DELETE FROM member WHERE source='guest'")
-        for item in members:
+        for item in by_account.values():
             mid = str(uuid.UUID(item["id"]))
             if conn.execute("SELECT 1 FROM member WHERE id=? AND source='cloud'", (mid,)).fetchone():
                 continue

@@ -320,7 +320,7 @@ function renderPractice(){
   const rows=sessions.flatMap(practiceRows).sort((a,b)=>(a.best??Infinity)-(b.best??Infinity));
   $('practiceTrack').textContent=active?.track_name||trackAktif()?.name||'Pilih track di menu Track';
   $('practiceDrivers').textContent=rows.length;$('practiceLaps').textContent=rows.reduce((n,d)=>n+d.laps,0);
-  $('practiceSync').textContent=accountData.syncing?'Sinkronisasi…':accountData.online?'Online · otomatis':'Tersimpan di perangkat';
+  $('practiceSync').textContent=accountData.syncing?'Sinkronisasi…':cloudOnline()?'Online · otomatis':'Tersimpan di perangkat';
   $('practiceLive').innerHTML=ps.active?'<i></i> Otomatis aktif':sesi?.status!=='idle'?'Dijeda selama race':'Menunggu track aktif';
   $('practiceWindow').textContent=`Sesi ditutup setelah ${Number(ps.idle_seconds||120)} detik tanpa passing driver`;
   $('practiceBadge').textContent=rows.length;$('practiceBadge').classList.toggle('on',rows.length>0);
@@ -801,12 +801,19 @@ function renderGuest(){
       <span class="who"><b>${esc(m.nick||m.name)}</b><span>${esc(m.name)} · TP ${esc(tp)}</span></span>
       <span class="tps">${esc([m.mobil,m.kelas,'TTS: '+(m.tts_name||'—')].filter(Boolean).join(' · '))}</span>
       <span class="role">${row.local?'Lokal':'Profil akun'}</span>
-      ${conflict?`<div style="width:100%;padding:10px;background:#f4f8fc;border-radius:8px">Profil akun ditemukan: <b>${esc(row.account.name)}</b> · ${esc(row.account.nick||'')} · TTS ${esc(row.account.tts_name||'—')}
-        <button class="btn sm" data-guest-resolve="${esc(tp)}" data-account-id="${esc(row.account.id)}">Gunakan profil akun</button></div>`:''}
+      ${row.local?.source==='local_guest'?`<button class="btn sm" data-guest-delete="${esc(row.local.id)}">Hapus</button>`:''}
+      ${conflict?`<div style="width:100%;padding:10px;background:#f4f8fc;border-radius:8px">Akun cocok ditemukan: <b>${esc(row.account.name)}</b> · Nick ${esc(row.account.nick||'—')} · TTS ${esc(row.account.tts_name||'—')} · Class ${esc(row.account.kelas||'—')} · RC ${esc(row.account.mobil||'—')}
+        <button class="btn sm" data-guest-resolve="${esc(tp)}" data-account-id="${esc(row.account.id)}">Ganti ke profil akun</button></div>`:''}
     </div>`;
   }).join('') || '<div class="empty">Belum ada tamu. Tekan Tangkap transponder dan minta satu passing.</div>';
 }
 $('guestList').onclick=async e=>{
+  const del=e.target.closest('[data-guest-delete]');
+  if(del){
+    if(!confirm('Hapus tamu lokal ini? Hasil race yang sudah tersimpan tetap ada.'))return;
+    try{const r=await api('/api/guest/delete',{id:del.dataset.guestDelete});DATA.member=r.members;renderGuest();renderRoster();toast('Tamu lokal dihapus');}
+    catch(err){gagal(err);}return;
+  }
   const b=e.target.closest('[data-guest-resolve]');if(!b)return;
   try{const r=await api('/api/guest/resolve',{transponder:b.dataset.guestResolve,account_id:b.dataset.accountId});DATA.member=r.members;renderGuest();renderRoster();toast('Profil akun digunakan untuk sesi berikutnya');}
   catch(err){gagal(err);}
@@ -1229,6 +1236,7 @@ window.YurLapsUI={api,toast,getRace:()=>sesi,getMembers:()=>DATA.member,refreshA
    Panel akun: OAuth website YurLaps + status sinkronisasi nyata.
    ------------------------------------------------------------------------- */
 let accountData = { user_id:null, email:'', selected_club:null, clubs:[], online:false, syncing:false };
+function cloudOnline(){return !!accountData.online && !(typeof navigator!=='undefined' && navigator.onLine===false);}
 let accountBusy = false;
 function accountName(){
   if(accountData.nickname||accountData.name)return accountData.nickname||accountData.name;
@@ -1260,9 +1268,10 @@ function renderAccount(){
   syncError.hidden=!logged || !accountData.error;
   syncError.textContent=accountData.error ? 'Sinkronisasi: '+accountData.error : '';
   $('menuSync').hidden=!logged;
-  $('pill').classList.toggle('online',!!accountData.online); $('pill').classList.toggle('offline',!accountData.online);
+  const online=cloudOnline();
+  $('pill').classList.toggle('online',online); $('pill').classList.toggle('offline',!online);
   const pending = Number(accountData.pending_races||0) + Number(accountData.pending_practice||0) + Number(accountData.pending_tracks||0);
-  let syncText = logged ? (accountData.syncing?'Sinkronisasi…':(accountData.online?'Online · sinkronisasi otomatis':'Offline · data tersimpan lokal')) : 'Offline · login untuk sinkronisasi';
+  let syncText = logged ? (!online?'Offline · data tersimpan lokal':accountData.syncing?'Sinkronisasi…':'Online · sinkronisasi otomatis') : 'Offline · login untuk sinkronisasi';
   if(logged && !accountData.syncing && pending) syncText += ` · ${pending} menunggu`;
   if(logged && accountData.error && !accountData.syncing) syncText += ' · periksa pesan';
   $('pilltxt').textContent=syncText;
@@ -1272,6 +1281,8 @@ async function refreshAccount(){
   try{ const r=await api('/api/cloud/status'); accountData=r.cloud||{}; renderAccount(); }
   catch(e){ /* account status unavailable while local server starts */ }
 }
+window.addEventListener('online',()=>{renderAccount();refreshAccount();});
+window.addEventListener('offline',renderAccount);
 $('btnAkun').onclick=e=>{e.stopPropagation();if(!accountData.user_id){$('menuLogin').click();return;}const m=$('accountMenu');m.hidden=!m.hidden;renderAccount();};
 $('menuLogin').onclick=async()=>{
   $('accountMenu').hidden=true;

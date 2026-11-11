@@ -743,6 +743,13 @@ def make_handler(ctx: AppContext):
                     return self._err(400, str(exc))
                 return self._json({"ok": True, "members": ctx.club.members()})
 
+            if path == "/api/guest/delete":
+                if ctx.race.status != "idle":
+                    return self._err(409, "Selesaikan race sebelum menghapus tamu")
+                if not ctx.club.delete_local_guest(str(data.get("id") or "")):
+                    return self._err(403, "Hanya tamu lokal yang dapat dihapus")
+                return self._json({"ok": True, "members": ctx.club.members()})
+
             if path == "/api/race/track":
                 try:
                     ctx.race.set_track(data.get("track_id") or "")

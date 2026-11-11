@@ -60,6 +60,13 @@ class CloudIntegrationTest(unittest.TestCase):
         self.assertEqual(len(FakeClient.uploaded),1)
         store=ClubStore(self.service.database_path())
         self.assertEqual(store.race('local-race')['sync'],'terkirim');store.close()
+    def test_online_badge_follows_latest_connection_attempt(self):
+        self.login();self.sync()
+        self.assertTrue(self.service.status()['online'])
+        FakeClient.offline=True;self.sync()
+        self.assertFalse(self.service.status()['online'])
+        FakeClient.offline=False;self.sync()
+        self.assertTrue(self.service.status()['online'])
     def test_club_switch_keeps_origin_and_uploads_all_authorized_caches(self):
         self.login();self.race();first=self.service.database_path()
         self.service.select_club(OTHER)
@@ -75,6 +82,16 @@ class CloudIntegrationTest(unittest.TestCase):
         self.service.state['expires_at']=0;FakeClient.expired=True;self.sync()
         self.assertTrue(self.service.status()['login_required'])
         self.assertEqual(self.service.status()['selected_club'],CLUB)
+    def test_transient_refresh_error_preserves_login_for_next_start(self):
+        self.login();self.service.state['expires_at']=0
+        with patch.object(FakeClient, '_request', side_effect=UploadError('gateway unavailable', 400)):
+            self.service.sync_once()
+        self.assertEqual(self.service.credentials.load()['refresh_token'], 'refresh')
+        self.service=CloudService(Path(self.temp.name),client_factory=FakeClient)
+        self.assertFalse(self.service.status()['login_required'])
+        self.service.state['expires_at']=0
+        self.sync()
+        self.assertEqual(self.service.credentials.load()['refresh_token'], 'rotated-refresh')
     def test_logout_does_not_delete_pending_race(self):
         self.login();self.race();path=self.service.database_path();self.service.logout()
         self.assertFalse(self.service.status()['user_id'])

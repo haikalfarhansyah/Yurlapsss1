@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from app.club import ClubStore
-from app.member_sync import refresh_members
+from app.member_sync import refresh_members, refresh_visiting_drivers
 
 CLUB = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 MEMBER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
@@ -26,6 +26,30 @@ class Client:
 
 
 class MemberSyncTest(unittest.TestCase):
+    def test_offline_guest_resolves_after_observation_expires_and_can_be_deleted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = ClubStore(pathlib.Path(folder) / "club.sqlite3")
+            try:
+                store.set_club(club_id=CLUB)
+                store.observe_transponder(123)
+                local = store.save_local_guest(123, "Nama offline", "Offline")
+                store._conn.execute("UPDATE observed_transponder SET observed_at=0 WHERE transponder='123'")
+                store._conn.commit()
+                class VisitorClient:
+                    def _request(self, path, method, body):
+                        assert body["p_transponders"] == ["123"]
+                        return [{"id": MEMBER, "full_name": "Nama akun", "nickname": "Nick",
+                                 "tts_name": "TTS", "transponder_details": [
+                                     {"transponder_id": "123", "rc_class": "Mod", "rc_brand": "RC"}]}]
+                refresh_visiting_drivers(store, CLUB, VisitorClient())
+                self.assertEqual(store.member_for_transponder(123)["id"], local["id"])
+                self.assertEqual(next(m for m in store.members() if m["id"] == MEMBER)["nick"], "Nick")
+                self.assertFalse(store.delete_local_guest(MEMBER))
+                self.assertTrue(store.delete_local_guest(local["id"]))
+                self.assertEqual(store.member_for_transponder(123)["id"], MEMBER)
+            finally:
+                store.close()
+
     def test_visitor_becoming_club_member_replaces_guest_alias(self):
         with tempfile.TemporaryDirectory() as folder:
             store = ClubStore(pathlib.Path(folder) / "club.sqlite3")
