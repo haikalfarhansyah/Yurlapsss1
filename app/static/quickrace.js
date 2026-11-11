@@ -803,6 +803,21 @@ async function segarkanDecoder(){
     const d = st.decoder || {}, status = d.status || {}, manager = d.manager || {};
     decOnline = !!d.online;
     $('decDev').textContent = 'YurLaps Decoder';
+    $('decSelectedSerial').textContent = d.selected_serial || 'Belum dipilih';
+    $('decEndpoint').textContent = d.endpoint || 'tcp://127.0.0.1:5556';
+    if(document.activeElement !== $('decPortInput')) $('decPortInput').value = Number((d.endpoint || '').split(':').pop()) || 5556;
+    $('decPortInput').disabled = sedangJalan();
+    $('decPortSave').disabled = sedangJalan();
+    const devices = d.devices || [];
+    $('decSerialList').innerHTML = devices.length ? devices.map(device => {
+      const serial = device.serial || '';
+      const description = device.problem || (device.active ? 'Aktif otomatis saat tersambung' : 'Terdeteksi, belum aktif');
+      return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #e8edf2;flex-wrap:wrap">
+        <div style="flex:1;min-width:180px"><b class="mono">${esc(serial || 'Serial tidak terbaca')}</b><small style="display:block;color:#64748b">${esc(device.name || 'RTL-SDR')} · ${esc(description)}</small></div>
+        <span class="note">Gain ${Number(device.gain ?? 20).toFixed(1)} dB</span>
+        <button type="button" class="btn sm ${device.active ? '' : 'primary'}" data-dec-serial="${esc(serial)}" data-dec-enabled="${device.active ? 'false' : 'true'}" ${!device.selectable || sedangJalan() ? 'disabled' : ''}>${device.active ? 'Nonaktifkan' : 'Aktifkan decoder'}</button>
+      </div>`;
+    }).join('') : '<div class="note">Belum ada RTL-SDR terdeteksi. Colok dongle dan periksa driver USB.</div>';
     $('topDecoder').className='pill '+(decOnline?'online':'offline');
     $('topDecoderText').textContent=decOnline?'Decoder terhubung':'Decoder tidak terhubung';
     $('decLed').textContent = decOnline ? '● Data diterima' : manager.running ? '● Proses aktif · belum ada data' : '○ Tidak terhubung';
@@ -817,7 +832,8 @@ async function segarkanDecoder(){
     $('decGain').textContent = g.toFixed(1) + ' dB';
     gainTersimpan = g;
     if(document.activeElement !== $('gainRange') && !gainSibuk){$('gainRange').value=g;$('gainVal').textContent=g.toFixed(1)+' dB';}
-    $('gainRange').disabled = sedangJalan(); $('btnDecStart').disabled = sedangJalan();
+    $('gainRange').disabled = sedangJalan() || !d.selected_serial;
+    $('btnDecStart').disabled = sedangJalan() || !d.selected_serial;
     const passes = (d.passes || []).slice().reverse();
     $('decLogN').textContent = passes.length + ' terakhir';
     $('decLogBody').innerHTML = passes.map(p=>`<tr><td class="mono">${esc(p.transponder_id)}</td><td class="nm">${esc(p.driver || 'Belum terdaftar')}</td>
@@ -833,6 +849,26 @@ async function segarkanDecoder(){
 function renderDecoderLog(){segarkanDecoder();}
 function catatDecoder(){segarkanDecoder();}
 setInterval(segarkanDecoder, 1000);
+$('decSerialList').onclick = async event => {
+  const button = event.target.closest('button[data-dec-serial]');
+  if(!button) return;
+  button.disabled = true;
+  try{
+    const enabled = button.dataset.decEnabled === 'true';
+    await api('/api/decoder/select', {serial: button.dataset.decSerial, enabled});
+    toast(enabled ? 'Serial disimpan. Decoder sedang diaktifkan.' : 'Decoder dinonaktifkan.');
+  }catch(err){gagal(err);}
+  await segarkanDecoder();
+};
+$('decPortSave').onclick = async () => {
+  const port = Number($('decPortInput').value);
+  if(!Number.isInteger(port) || port < 1024 || port > 65535){toast('Port harus antara 1024 dan 65535.');return;}
+  try{
+    await api('/api/decoder/port', {port});
+    toast('Port ZeroMQ disimpan. Decoder menghubungkan ulang.');
+    await segarkanDecoder();
+  }catch(err){gagal(err);}
+};
 
 /* Gain: geser = angka di layar; lepas = konfirmasi lalu simpan.
    Tanpa jeda/debounce: satu gerakan = satu konfirmasi (sebelumnya konfirmasi

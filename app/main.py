@@ -120,6 +120,7 @@ class YurLaps:
 
         # 1) pembaca ZeroMQ (selalu jalan, tidak peduli decoder asli/hilang)
         self.decoder = DecoderClient(self.engine, self.cfg.zmq_endpoint)
+        self.ctx.decoder_client = self.decoder
         self.decoder.start()
 
         # 2) pemeriksaan perangkat + supervisor decoder (Windows/desktop)
@@ -190,14 +191,17 @@ class YurLaps:
         """Periksa YurLaps Decoder. Dipanggil saat start dan berkala: perangkat
         yang tersambung/terputus saat aplikasi berjalan langsung terdeteksi."""
         try:
-            from .devices import detect, can_install_driver
+            from .devices import detect, can_install_driver, list_sdr_devices
             info = detect(self.cfg.driver_vid, self.cfg.driver_pid)
             self.engine.device_info = info.to_dict()
+            devices = list_sdr_devices(self.cfg.driver_vid, self.cfg.driver_pid)
+            self.engine.device_info["devices"] = devices
             ok, why = can_install_driver()
             self.engine.device_info["can_install"] = ok
             self.engine.device_info["install_reason"] = why
             prev = self._device_seen
-            now_seen = bool(getattr(info, "present", False))
+            selected = self.cfg.decoder_device_serial
+            now_seen = any(d["serial"] == selected and d["selectable"] for d in devices) if selected else False
             self._device_seen = now_seen
             supervisor = self.supervisor
             if supervisor is not None:
@@ -232,9 +236,10 @@ class YurLaps:
 
     def stop(self) -> None:
         self._stop.set()
-        if self.decoder is not None:
-            self.decoder.stop()
-            self.decoder.join(timeout=5)
+        active_decoder_client = getattr(self.ctx, "decoder_client", self.decoder)
+        if active_decoder_client is not None:
+            active_decoder_client.stop()
+            active_decoder_client.join(timeout=5)
         try:
             self.ctx.practice.close_all("application_closed")
         except Exception as exc:

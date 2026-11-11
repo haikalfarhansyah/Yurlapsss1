@@ -85,6 +85,8 @@ def test_manager_autorestart():
     cfg.decoder_idle_restart = 60          # jangan restart karena idle di tes ini
     cfg.decoder_restart_max_delay = 2
     cfg.decoder_auto_download = False
+    cfg.decoder_device_serial = "YD-TEST"
+    cfg.decoder_devices = {"YD-TEST": {"enabled": True, "gain": cfg.decoder_gain}}
     cfg.min_lap_seconds = 0.2        # lap sintetis cepat (0.3 s) harus diterima
 
     exe = write_fake_decoder(Path(DATA))
@@ -98,6 +100,7 @@ def test_manager_autorestart():
 
     statuses = []
     mgr = DecoderManager(cfg, eng, on_change=lambda s: statuses.append(s))
+    mgr.device_changed(True)  # synthetic USB presence for fake decoder
     mgr.start()
     time.sleep(7.5)                        # cukup untuk 1x hidup + 1x restart
 
@@ -132,6 +135,8 @@ def test_manager_idle_detect():
     cfg.decoder_args = ""
     cfg.decoder_idle_restart = 3
     cfg.decoder_auto_download = False
+    cfg.decoder_device_serial = "YD-TEST"
+    cfg.decoder_devices = {"YD-TEST": {"enabled": True, "gain": cfg.decoder_gain}}
 
     # skrip yang hidup tapi tidak pernah mengirim data -> harus di-restart
     path = Path(DATA) / "bin" / "openstint_silent"
@@ -141,6 +146,7 @@ def test_manager_idle_detect():
 
     eng = Engine(cfg)
     mgr = DecoderManager(cfg, eng)
+    mgr.device_changed(True)
     mgr.start()
     time.sleep(9.0)
     check(mgr.status.restarts >= 1,

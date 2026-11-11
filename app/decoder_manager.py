@@ -157,6 +157,8 @@ class DecoderManager(threading.Thread):
         if previous is not present:
             self._wake.set()
         if previous is True and not present:
+            self._kill_process()
+            self._publish(running=False, pid=None)
             self._publish(state="waiting", message="YurLaps Decoder dilepas; menunggu sambungan …")
             return
         if not present or previous is present or previous is None:
@@ -380,6 +382,18 @@ class DecoderManager(threading.Thread):
                 self._wait(RETRY_SECONDS)
                 continue
             self.status.mode = "managed"
+            serial = (self.cfg.decoder_device_serial or "").strip()
+            profile = (self.cfg.decoder_devices or {}).get(serial, {})
+            if not serial or not profile.get("enabled"):
+                self._publish(state="waiting", running=False, pid=None,
+                              message="Pilih serial RTL-SDR di menu Decoder lalu aktifkan.")
+                self._wait(RETRY_SECONDS)
+                continue
+            if self._device_present is not True:
+                self._publish(state="waiting", running=False, pid=None,
+                              message=f"Menunggu RTL-SDR {serial} dicolokkan …")
+                self._wait(RETRY_SECONDS)
+                continue
             exe = self.find_decoder()
 
             if exe is None:

@@ -93,6 +93,7 @@ class AppContext:
         # RLock: properti race membuat RaceEngine lewat properti club
         self._club_lock = threading.RLock()
         self.decoder_manager = None
+        self.decoder_client = None
         self.updater = None
         self.update_pending = False
         from .practice import PracticeRecorder
@@ -410,6 +411,13 @@ def make_handler(ctx: AppContext):
                                               for p in snap["decoder"]["passes"]]
                 snap["decoder"]["gain"] = cfg.decoder_gain
                 snap["decoder"]["name"] = "YurLaps Decoder"
+                snap["decoder"]["selected_serial"] = cfg.decoder_device_serial
+                snap["decoder"]["devices"] = [
+                    dict(device, gain=(cfg.decoder_devices.get(device["serial"], {})
+                                       .get("gain", cfg.decoder_gain)),
+                         active=device["serial"] == cfg.decoder_device_serial and
+                                bool(cfg.decoder_devices.get(device["serial"], {}).get("enabled")))
+                    for device in snap["decoder"].get("device", {}).get("devices", [])]
                 snap["settings"].update({
                     "track_name": cfg.track_name,
                     "event_name": cfg.event_name,
@@ -1002,8 +1010,73 @@ def make_handler(ctx: AppContext):
                 engine.log("info", f"Perangkat: {info.message}")
                 return self._json({"ok": True, "device": info.to_dict()})
 
-            if path in ("/api/decoder/gain", "/api/decoder/restart") and ctx.race.status in ("live", "countdown", "paused"):
+            if path in ("/api/decoder/gain", "/api/decoder/restart", "/api/decoder/select", "/api/decoder/port") and ctx.race.status in ("live", "countdown", "paused"):
                 return self._err(409, "Selesaikan sesi sebelum mengubah gain atau restart decoder.")
+
+            if path == "/api/decoder/port":
+                try:
+                    port = int(data.get("port"))
+                except (TypeError, ValueError):
+                    return self._err(400, "Port ZeroMQ harus berupa angka.")
+                if not 1024 <= port <= 65535:
+                    return self._err(400, "Port ZeroMQ harus antara 1024 dan 65535.")
+                endpoint = f"tcp://127.0.0.1:{port}"
+                if endpoint != cfg.zmq_endpoint:
+                    if ctx.decoder_manager is not None and ctx.decoder_manager.status.mode == "external":
+                        return self._err(409, "Tutup decoder eksternal sebelum mengganti port.")
+                    old = ctx.decoder_client
+                    if old is None:
+                        return self._err(503, "Subscriber ZeroMQ belum aktif.")
+                    old.stop()
+                    old.join(timeout=3)
+                    if old.is_alive():
+                        return self._err(503, "Subscriber lama belum berhenti; port tidak diubah.")
+                    from .decoder import DecoderClient
+                    new_client = DecoderClient(engine, endpoint)
+                    cfg.zmq_endpoint = endpoint
+                    cfg.save()
+                    ctx.decoder_client = new_client
+                    engine.decoder_online = False
+                    new_client.start()
+                    if ctx.decoder_manager is not None:
+                        ctx.decoder_manager.restart_now(reason=f"port ZeroMQ {port}")
+                return self._json({"ok": True, "port": port, "endpoint": endpoint})
+
+            if path == "/api/decoder/select":
+                serial = str(data.get("serial") or "").strip()
+                enabled = data.get("enabled")
+                if not serial or not isinstance(enabled, bool):
+                    return self._err(400, "Pilih serial dan status aktivasi yang valid.")
+                from .devices import list_sdr_devices
+                devices = list_sdr_devices(cfg.driver_vid, cfg.driver_pid)
+                found = next((d for d in devices if d["serial"] == serial), None)
+                if enabled and (not found or not found["selectable"]):
+                    return self._err(400, "Serial unik belum terbaca. Periksa perangkat dan driver RTL-SDR.")
+                if enabled:
+                    try:
+                        gain = float(data.get("gain", cfg.decoder_devices.get(serial, {}).get("gain", cfg.decoder_gain)))
+                    except (TypeError, ValueError):
+                        return self._err(400, "Gain harus berupa angka.")
+                    import math
+                    if not math.isfinite(gain) or not 0 <= gain <= 49.6:
+                        return self._err(400, "Gain harus 0–49,6 dB.")
+                    cfg.decoder_devices[serial] = {"enabled": True, "gain": gain}
+                    cfg.decoder_device_serial = serial
+                    cfg.decoder_gain = gain
+                    cfg.manage_decoder = True
+                else:
+                    cfg.decoder_devices.setdefault(serial, {"gain": cfg.decoder_gain})["enabled"] = False
+                    if cfg.decoder_device_serial == serial:
+                        cfg.decoder_device_serial = ""
+                cfg.save()
+                if ctx.decoder_manager is not None:
+                    ctx.decoder_manager.device_changed(bool(enabled))
+                    if enabled and not ctx.decoder_manager.is_alive() and not ctx.decoder_manager._stop_event.is_set():
+                        ctx.decoder_manager.start()
+                    elif ctx.decoder_manager.is_alive():
+                        ctx.decoder_manager.restart_now(reason="pilihan serial diubah")
+                return self._json({"ok": True, "serial": serial, "enabled": enabled,
+                                   "gain": cfg.decoder_gain})
 
             if path == "/api/decoder/gain":
                 # Ubah gain tuner -> simpan -> restart openstint.exe (debounce).
@@ -1020,6 +1093,10 @@ def make_handler(ctx: AppContext):
                                        "message": "Gain disimpan (supervisor "
                                                   "decoder tidak aktif)."})
                 applied = mgr.apply_gain(gain)
+                serial = cfg.decoder_device_serial
+                if serial:
+                    cfg.decoder_devices.setdefault(serial, {"enabled": True})["gain"] = applied
+                    cfg.save()
                 engine.log("info", f"Gain decoder diubah ke {applied:g} dB")
                 restarted = bool(mgr.status.running and ctx.cfg.manage_decoder)
                 return self._json({

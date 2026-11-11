@@ -723,7 +723,7 @@
     <!-- ==================== DECODER ==================== -->
     <div class="page" id="view-decoder" style="display:none">
       <div class="head">
-        <div><h1>Decoder</h1><div class="lead">Status penerima dan pengaturan gain.</div></div>
+        <div><h1>Decoder</h1><div class="lead">Pilih RTL-SDR berdasarkan serial, lalu atur gain penerima.</div></div>
         <div class="right">
           
           <button class="btn primary" id="btnDecStart">Mulai ulang</button>
@@ -738,6 +738,11 @@
       </div>
       <div class="big" style="margin-bottom:16px;padding:16px"><div class="note" id="decDiagnostic">Menunggu YurLaps Decoder…</div>
         <svg id="noiseChart" viewBox="0 0 900 110" role="img" aria-label="Riwayat noise decoder" style="width:100%;height:110px;margin-top:10px"></svg></div>
+      <div class="big" style="margin-bottom:13px">
+        <div class="big-bar"><span>RTL-SDR terpasang</span><span class="note" style="margin-left:auto">Satu decoder aktif</span></div>
+        <div id="decSerialList" style="padding:14px 16px"></div>
+        <div class="note" style="padding:0 16px 14px">Aktifkan sekali untuk menyimpan serial. Saat dongle dengan serial itu dicolok lagi, YurLaps mencoba menjalankannya otomatis. Serial yang sama pada dua dongle tidak dapat dipilih.</div>
+      </div>
       <div class="big" style="margin-bottom:13px">
         <div class="big-bar"><span>Pengaturan penerima</span>
           <span style="margin-left:auto" id="gainDev">YurLaps Decoder</span></div>
@@ -768,8 +773,11 @@
         <div>
           <div class="side-card"><h3>Perangkat</h3>
             <div class="kv"><span>Decoder</span><b id="decDev">YurLaps Decoder</b></div>
+            <div class="kv"><span>Serial aktif</span><b id="decSelectedSerial">—</b></div>
+            <div class="kv"><span>Port ZeroMQ</span><b id="decEndpoint">tcp://127.0.0.1:5556</b></div>
+            <div style="display:flex;gap:6px;margin:10px 0"><input id="decPortInput" type="number" min="1024" max="65535" step="1" value="5556" aria-label="Port ZeroMQ" style="min-width:0;width:100%;padding:7px;border:1px solid #d9e2ea;border-radius:8px"><button class="btn sm" id="decPortSave" type="button">Simpan</button></div>
             <div class="kv"><span>Versi</span><b>YurLaps Decoder</b></div>
-            <div class="note">Semua transponder yang terbaca muncul di log, termasuk yang belum didaftarkan.</div></div>
+            <div class="note">Port adalah jalur data decoder ke aplikasi. Simpan saat tidak ada sesi berjalan; YurLaps menghubungkan ulang subscriber dan decoder bersama. Semua transponder yang terbaca muncul di log.</div></div>
           <div class="side-card"><h3>Sumber waktu</h3><div class="note">Lap dan urutan lintasan memakai timestamp YurLaps Decoder. Nama diambil dari member lokal bila tersedia. Proses aktif belum berarti data radio diterima.</div></div>
         </div>
       </div>

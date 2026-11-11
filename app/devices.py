@@ -17,6 +17,9 @@ Catatan penting:
 from __future__ import annotations
 
 import os
+import ctypes
+import ctypes.util
+import json
 import re
 import shutil
 import subprocess
@@ -94,6 +97,87 @@ def _run(cmd: list[str], timeout: int = 25) -> str:
         return f"__error__ {exc}"
 
 
+def list_sdr_devices(vid: str = "0x0bda", pid: str = "0x2838") -> list[dict]:
+    """List attached RTL-SDRs with their EEPROM USB serial when available.
+
+    librtlsdr reads the actual USB string descriptor. Windows PnP is only a
+    fallback; a location-generated instance ID is never treated as a serial.
+    """
+    candidates = []
+    base = getattr(sys, "_MEIPASS", None)
+    for root in filter(None, [Path(base) if base else None,
+                              app_root(), app_root() / "vendor" / "openstint",
+                              app_root() / "_internal" / "vendor" / "openstint"]):
+        for name in ("librtlsdr.dll", "rtlsdr.dll", "librtlsdr.so", "librtlsdr.dylib"):
+            candidates.append(str(root / name))
+    lib_name = ctypes.util.find_library("rtlsdr")
+    if lib_name:
+        candidates.append(lib_name)
+    for candidate in candidates:
+        try:
+            lib = ctypes.CDLL(candidate)
+            lib.rtlsdr_get_device_count.restype = ctypes.c_uint32
+            lib.rtlsdr_get_device_usb_strings.argtypes = [
+                ctypes.c_uint32, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+            lib.rtlsdr_get_device_usb_strings.restype = ctypes.c_int
+            lib.rtlsdr_get_device_name.argtypes = [ctypes.c_uint32]
+            lib.rtlsdr_get_device_name.restype = ctypes.c_char_p
+            devices = []
+            for index in range(min(lib.rtlsdr_get_device_count(), 32)):
+                maker, product, serial = (ctypes.create_string_buffer(256) for _ in range(3))
+                if lib.rtlsdr_get_device_usb_strings(index, maker, product, serial) != 0:
+                    continue
+                value = serial.value.decode("utf-8", "replace").strip()
+                name = (lib.rtlsdr_get_device_name(index) or b"RTL-SDR").decode("utf-8", "replace")
+                devices.append({"serial": value, "name": name, "index": index,
+                                "source": "eeprom", "selectable": bool(value)})
+            if devices:
+                return _mark_unique(devices)
+        except (OSError, AttributeError, ValueError):
+            continue
+    if not IS_WINDOWS:
+        return []
+    ps = ("Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPDeviceID -like 'USB*' } | "
+          "Select-Object Name,PNPDeviceID,Service | ConvertTo-Json -Compress")
+    raw = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps])
+    try:
+        records = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if isinstance(records, dict):
+        records = [records]
+    tag = f"VID_{_norm_hex(vid)[2:]}&PID_{_norm_hex(pid)[2:]}"
+    devices = []
+    for item in records:
+        original_id = str(item.get("PNPDeviceID") or "")
+        pnp = original_id.upper()
+        if tag not in pnp or "&MI_" in pnp:
+            continue
+        suffix = original_id.rsplit("\\", 1)[-1]
+        # Windows synthesizes location IDs such as 6&123AB&0&2.
+        real_serial = bool(suffix and "&" not in suffix)
+        devices.append({"serial": suffix if real_serial else "",
+                        "name": item.get("Name") or "RTL-SDR", "index": None,
+                        "source": "windows-usb" if real_serial else "unavailable",
+                        "selectable": real_serial})
+    return _mark_unique(devices)
+
+
+def _mark_unique(devices: list[dict]) -> list[dict]:
+    counts = {}
+    for device in devices:
+        serial = device["serial"]
+        if serial:
+            counts[serial] = counts.get(serial, 0) + 1
+    for device in devices:
+        if device["serial"] and counts[device["serial"]] > 1:
+            device["selectable"] = False
+            device["problem"] = "Serial sama dengan dongle lain; tulis serial EEPROM unik."
+        elif not device["selectable"]:
+            device["problem"] = "Serial EEPROM belum dapat dibaca."
+    return devices
+
+
 def detect(vid: str = "0x0bda", pid: str = "0x2838") -> DeviceInfo:
     """Cari YurLaps Decoder yang terpasang dan periksa driver-nya."""
     if not IS_WINDOWS:
@@ -123,7 +207,7 @@ def detect(vid: str = "0x0bda", pid: str = "0x2838") -> DeviceInfo:
 
     for dev in data:
         pnp = (dev.get("PNPDeviceID") or "").upper()
-        if vid_hex.upper() in pnp and pid_hex.upper() in pnp:
+        if f"VID_{vid_hex[2:]}&PID_{pid_hex[2:]}" in pnp:
             info.present = True
             info.name = dev.get("Name") or "YurLaps Decoder"
             info.service = dev.get("Service") or ""
@@ -142,7 +226,7 @@ def detect(vid: str = "0x0bda", pid: str = "0x2838") -> DeviceInfo:
 def _detect_fallback(info: DeviceInfo, vid: str, pid: str) -> DeviceInfo:
     """Kalau PowerShell diblokir: pakai pnputil / wmic."""
     raw = _run(["pnputil", "/enum-devices", "/connected"])
-    if "__error__" not in raw and vid.upper() in raw.upper():
+    if "__error__" not in raw and f"VID_{vid[2:]}&PID_{pid[2:]}" in raw.upper():
         info.present = True
         info.name = "YurLaps Decoder (via pnputil)"
         return _classify(info)

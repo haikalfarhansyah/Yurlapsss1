@@ -97,6 +97,7 @@ class Config:
     decoder_bias_tee: bool = False     # -b bias tee +4.5 V
     decoder_direct_sampling: bool = False  # -D direct sampling Q-branch
     decoder_device_serial: str = ""    # -d <serial> (kosong = dongle pertama)
+    decoder_devices: dict[str, dict] = field(default_factory=dict)  # serial -> gain, enabled
     decoder_use_system_clock: bool = False  # -t pakai jam sistem
     decoder_monitor: bool = False      # -m monitor mode (cetak frame)
     decoder_auto_download: bool = True # unduh rilis resmi kalau belum ada
@@ -186,6 +187,12 @@ class Config:
             args.append("-t")
         if self.decoder_monitor:
             args.append("-m")
+        try:
+            port = int(self.zmq_endpoint.rsplit(":", 1)[1])
+            if self.zmq_endpoint.startswith("tcp://127.0.0.1:") and 1024 <= port <= 65535:
+                args += ["-p", str(port)]
+        except (IndexError, TypeError, ValueError):
+            pass
         extra = (self.decoder_args or "").strip()
         if extra:
             args += extra.split()
@@ -258,9 +265,21 @@ class Config:
                     cfg.decoder_device_serial = parts[i + 1]
                     i += 2
                     continue
+                if tok == "-p" and i + 1 < len(parts):
+                    try:
+                        port = int(parts[i + 1])
+                        if 1024 <= port <= 65535:
+                            cfg.zmq_endpoint = f"tcp://127.0.0.1:{port}"
+                    except ValueError:
+                        pass
+                    i += 2
+                    continue
                 kept.append(tok)
                 i += 1
             cfg.decoder_args = " ".join(kept)
+        if cfg.decoder_device_serial and cfg.decoder_device_serial not in cfg.decoder_devices:
+            cfg.decoder_devices[cfg.decoder_device_serial] = {
+                "gain": cfg.decoder_gain, "enabled": True}
         return cfg
 
     def save(self) -> None:
