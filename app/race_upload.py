@@ -142,19 +142,25 @@ class SupabaseRaceClient:
         query_params = {
             "club_id": "eq." + str(uuid.UUID(club_id)),
             "select": "id,club_id,name,track_name,raced_at,results,source_race_id,session_data",
-            "order": "raced_at.desc", "limit": str(limit),
+            "order": "raced_at.desc,id.asc", "limit": str(limit),
         }
-        try:
-            rows = self._request("/rest/v1/races?" + urllib.parse.urlencode(query_params), "GET")
-        except UploadError as exc:
-            # Older deployments may not have the immutable source/session
-            # columns yet. History pull is optional for uploading new races,
-            # so retry with the columns present in the original schema.
-            if exc.status != 400:
-                raise
-            query_params["select"] = "id,club_id,name,track_name,raced_at,results"
-            rows = self._request("/rest/v1/races?" + urllib.parse.urlencode(query_params), "GET")
-        return rows if isinstance(rows, list) else []
+        all_rows = []
+        while True:
+            query_params["offset"] = str(len(all_rows))
+            try:
+                rows = self._request("/rest/v1/races?" + urllib.parse.urlencode(query_params), "GET")
+            except UploadError as exc:
+                # Older deployments may not have the immutable source/session
+                # columns yet. Retry the same page with legacy columns.
+                if exc.status != 400 or query_params["select"] == "id,club_id,name,track_name,raced_at,results":
+                    raise
+                query_params["select"] = "id,club_id,name,track_name,raced_at,results"
+                rows = self._request("/rest/v1/races?" + urllib.parse.urlencode(query_params), "GET")
+            if not isinstance(rows, list):
+                raise UploadError("Respons riwayat race tidak valid")
+            all_rows.extend(rows)
+            if len(rows) < limit:
+                return all_rows
 
     def delete_race(self, club_id: str, race_id: str) -> None:
         query = urllib.parse.urlencode({"id": "eq." + str(uuid.UUID(race_id)),

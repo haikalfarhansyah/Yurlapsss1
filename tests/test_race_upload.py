@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from app.club import ClubStore
-from app.race_upload import UploadError, remote_race_id, upload_pending, practice_payload
+from app.race_upload import UploadError, SupabaseRaceClient, remote_race_id, upload_pending, practice_payload
 
 CLUB = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 OTHER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -27,6 +27,20 @@ class FakeClient:
 
 
 class RaceUploadTest(unittest.TestCase):
+    def test_history_pull_reads_all_pages_before_delete_comparison(self):
+        client = SupabaseRaceClient("https://example.supabase.co", "key", "token")
+        remote = [{"id": str(i)} for i in range(1001)]
+        offsets = []
+        def request(path, method="GET"):
+            from urllib.parse import parse_qs, urlsplit
+            query = parse_qs(urlsplit(path).query)
+            offset = int(query.get("offset", [0])[0])
+            offsets.append(offset)
+            return remote[offset:offset+int(query["limit"][0])]
+        client._request = request
+        self.assertEqual(client.fetch_races(CLUB), remote)
+        self.assertEqual(offsets, [0, 500, 1000])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = ClubStore(pathlib.Path(self.tmp.name) / "club.sqlite3")

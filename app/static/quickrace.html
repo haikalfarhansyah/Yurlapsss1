@@ -381,12 +381,12 @@
   .sound-grid{display:grid;gap:12px}.sound-grid .check-label{display:flex;gap:9px;align-items:center;color:var(--ink);font-size:12px}.sound-grid input{width:17px;height:17px;accent-color:var(--blue)}
   #view-sound .check-label{display:flex;gap:9px;align-items:center;margin:10px 0}.practice-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.practice-member img.avatar{object-fit:cover}#dLapList{max-height:240px}.plog{max-height:300px}.plog td{font-size:11px}.plog td.nm{min-width:110px}.plog tr.skip{color:var(--muted)}@media(max-width:700px){.practice-metrics{grid-template-columns:1fr 1fr}}
 </style>
+<link rel="stylesheet" href="/static/yurlaps-ui.css">
 </head>
 <body>
 
 <!-- ==================== STARTUP SPLASH ==================== -->
 <div class="startup-splash" id="startupSplash" aria-label="YurLaps sedang dibuka">
-  <div class="splash-orbit"></div>
   <img src="/static/assets/yurlaps-logo.png" alt="YurLaps" class="splash-logo">
   <div class="splash-line">RC TIMING SYSTEM</div>
   <div class="splash-status"><span></span> menyiapkan timing engine</div>
@@ -403,7 +403,7 @@
 
 <div class="app">
   <aside>
-    <div class="brand"><div class="logo"><i><svg viewBox="0 0 24 24"><path d="M5 19l7-14 7 14"/></svg></i>YurLaps</div></div>
+    <div class="brand"><img src="/static/assets/yurlaps-logo.png" alt="YurLaps" class="brand-logo"></div>
     <div class="tag">RC TIMING SYSTEM</div>
 
     <button class="tab" data-view="practice">
@@ -741,12 +741,13 @@
     <!-- ==================== DECODER ==================== -->
     <div class="page" id="view-decoder" style="display:none">
       <div class="head">
-        <div><h1>Decoder</h1><div class="lead">YurLaps Decoder</div></div>
+        <div><h1>YurLaps Decoder</h1><div class="lead">Penerima lintasan</div></div>
         <div class="right">
           
           <button class="btn primary" id="btnDecStart">Mulai ulang</button>
         </div>
       </div>
+      <div class="decoder-overview">
       <div class="stat">
         <div class="cell"><span>Status</span><div style="margin-top:7px"><span class="led" id="decLed"><i></i>menunggu</span></div></div>
         
@@ -754,29 +755,28 @@
         <div class="cell"><span>Passing diterima</span><b id="decRate">0</b></div>
         <div class="cell"><span>Noise decoder · dBFS</span><b id="decNoise">—</b></div>
       </div>
-      <div class="big" style="margin-bottom:16px;padding:16px"><div class="note" id="decDiagnostic">Menunggu YurLaps Decoder…</div>
-        <svg id="noiseChart" viewBox="0 0 900 110" role="img" aria-label="Riwayat noise decoder" style="width:100%;height:110px;margin-top:10px"></svg></div>
-      <div class="big" style="margin-bottom:13px">
-        <div class="big-bar"><span>YurLaps Decoder</span><span class="note" style="margin-left:auto">Satu decoder aktif</span></div>
-        <div id="decSerialList" style="padding:14px 16px"></div>
+      <div class="big decoder-signal"><div class="decoder-signal-title">Sinyal penerima <span>dBFS</span></div><div class="note" id="decDiagnostic">Menunggu YurLaps Decoder…</div>
+        <svg id="noiseChart" viewBox="0 0 900 110" role="img" aria-label="Riwayat noise decoder"></svg></div>
       </div>
-      <div class="big" style="margin-bottom:13px">
-        <div class="big-bar"><span>Pengaturan penerima</span>
-          <span style="margin-left:auto" id="gainDev">YurLaps Decoder</span></div>
-        <div style="padding:14px 16px">
-          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
-            <label for="gainRange" style="font-size:9.5px;letter-spacing:.5px;font-weight:700;
-              text-transform:uppercase;color:var(--muted)">Gain tuner</label>
-            <b id="gainVal" style="font-family:'Cascadia Mono',Consolas,monospace;font-size:20px;
-              color:var(--ink);letter-spacing:-.5px">20.0 dB</b>
-            <span class="note" style="margin-left:auto" id="gainStatus">dibaca dari pengaturan</span>
+      <div class="decoder-controls">
+      <div class="big decoder-devices">
+        <div class="big-bar"><span>Perangkat tersedia</span><span class="note">Satu decoder aktif</span></div>
+        <div id="decSerialList"></div>
+      </div>
+      <div class="big decoder-gain">
+        <div class="big-bar"><span>Gain penerima</span><span id="gainDev">YurLaps Decoder</span></div>
+        <div class="decoder-gain-body">
+          <div class="decoder-gain-line">
+            <label for="gainRange">Gain tuner</label>
+            <b id="gainVal">20.0 dB</b>
+            <span class="note" id="gainStatus">dibaca dari pengaturan</span>
           </div>
-          <input type="range" id="gainRange" min="0" max="49.6" step="0.1" value="20"
-                 style="width:100%;accent-color:var(--blue)">
+          <input type="range" id="gainRange" min="0" max="49.6" step="0.1" value="20">
         </div>
       </div>
-      <div class="grid">
-        <div class="big">
+      </div>
+      <div class="grid decoder-bottom">
+        <div class="big decoder-passing">
           <div class="big-bar"><span>Lintasan terakhir</span><span style="margin-left:auto" id="decLogN">0</span></div>
           <div class="decoder-scroll"><table><thead><tr><th>Transponder</th><th>Pembalap</th>
             <th class="r">RSSI · dB</th><th class="r">Hit</th><th class="r" style="text-transform:none">Passing · µs</th><th class="r">Timestamp · ms</th></tr></thead>
