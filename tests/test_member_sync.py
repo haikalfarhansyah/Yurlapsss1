@@ -26,6 +26,27 @@ class Client:
 
 
 class MemberSyncTest(unittest.TestCase):
+    def test_visitor_becoming_club_member_replaces_guest_alias(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = ClubStore(pathlib.Path(folder) / "club.sqlite3")
+            try:
+                store.set_club(club_id=CLUB)
+                store.observe_transponder(123)
+                alias = store.save_local_guest(123, "Nama lokal", "Nama lokal")
+                store._conn.execute(
+                    "INSERT INTO member (id,name,status,source,transponder) VALUES (?,?,?,?,?)",
+                    (MEMBER, "Profil tamu", "active", "guest", '["123"]'))
+                store._conn.commit()
+                self.assertEqual(store.member_for_transponder(123)["id"], alias["id"])
+                self.assertEqual(refresh_members(store, CLUB, Client()), 1)
+                members = store.members()
+                self.assertEqual(len(members), 1)
+                self.assertEqual(members[0]["id"], MEMBER)
+                self.assertEqual(members[0]["source"], "cloud")
+                self.assertEqual(store.member_for_transponder(123)["id"], MEMBER)
+            finally:
+                store.close()
+
     def test_refresh_and_failure_preserve_cache(self):
         with tempfile.TemporaryDirectory() as folder:
             store = ClubStore(pathlib.Path(folder) / "club.sqlite3")

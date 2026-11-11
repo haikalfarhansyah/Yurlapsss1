@@ -380,8 +380,53 @@ class ClubStore:
 
     # -- member ----------------------------------------------------------
     def member_for_transponder(self, transponder):
-        return next((m for m in sorted(self.members(), key=lambda m: 0 if m.get("source") in ("cloud", "guest") else 1) if m.get("status") == "active"
+        priority = {"cloud": 0, "website": 0, "local_guest": 1, "local": 1, "guest": 2}
+        return next((m for m in sorted(self.members(), key=lambda m: priority.get(m.get("source"), 3)) if m.get("status") == "active"
                      and str(transponder) in {str(t) for t in m.get("transponder", [])}), None)
+
+    @locked
+    def save_local_guest(self, transponder, name: str, tts_name: str,
+                         nick: str = "", kelas: str = "", mobil: str = "") -> dict:
+        """An observed transponder gets a local guest identity, never an account link."""
+        tp = str(int(transponder))
+        if tp not in self.observed_transponders():
+            raise ValueError("Transponder belum terbaca. Gunakan Tangkap transponder.")
+        name, tts_name = str(name or "").strip(), str(tts_name or "").strip()
+        if not name or not tts_name:
+            raise ValueError("Nama dan nama TTS wajib diisi")
+        current = next((m for m in self.members() if tp in {str(x) for x in m["transponder"]}
+                        and m.get("source") in ("cloud", "website")), None)
+        if current:
+            raise ValueError("Transponder sudah terdaftar pada member club")
+        old = next((m for m in self.members() if tp in {str(x) for x in m["transponder"]}
+                    and m.get("source") in ("local_guest", "local")), None)
+        mid = old["id"] if old else "local-guest-" + uuid.uuid4().hex
+        self._conn.execute(
+            "INSERT INTO member (id,name,nick,kelas,mobil,role,status,transponder,updated_at,source,tts_name)"
+            " VALUES (?,?,?,?,?,'guest','active',?,?,'local_guest',?)"
+            " ON CONFLICT(id) DO UPDATE SET name=excluded.name,nick=excluded.nick,"
+            " kelas=excluded.kelas,mobil=excluded.mobil,transponder=excluded.transponder,"
+            " updated_at=excluded.updated_at,source='local_guest',tts_name=excluded.tts_name",
+            (mid, name, str(nick or ""), str(kelas or ""), str(mobil or ""),
+             json.dumps([int(tp)]), time.time(), tts_name))
+        self._conn.commit()
+        return next(m for m in self.members() if m["id"] == mid)
+
+    @locked
+    def resolve_local_guest(self, transponder, account_id: str) -> bool:
+        """Remove a local alias only after operator accepts the account profile."""
+        tp = str(int(transponder))
+        candidate = next((m for m in self.members() if m["id"] == account_id
+                          and m.get("source") in ("guest", "cloud")
+                          and tp in {str(x) for x in m["transponder"]}), None)
+        if not candidate:
+            raise ValueError("Profil akun belum tersedia untuk transponder ini")
+        aliases = [m["id"] for m in self.members() if m.get("source") in ("local_guest", "local")
+                   and tp in {str(x) for x in m["transponder"]}]
+        for mid in aliases:
+            self._conn.execute("DELETE FROM member WHERE id=?", (mid,))
+        self._conn.commit()
+        return bool(aliases)
 
     @locked
     def delete_member(self, member_id: str) -> bool:

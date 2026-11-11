@@ -149,7 +149,7 @@ async function segarkanSesi(){
 /* ============================================================================
    NAVIGASI
    ========================================================================== */
-const VIEWS = ['practice','quickrace','history','member','track','decoder','sound'];
+const VIEWS = ['practice','quickrace','history','member','guest','track','decoder','sound'];
 function show(v){
   VIEWS.forEach(k => { const s = $('view-' + k); if(s) s.style.display = (k === v) ? '' : 'none'; });
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.view === v));
@@ -157,6 +157,7 @@ function show(v){
   if(v === 'history') renderHistory();
   if(v === 'practice'){renderPractice();refreshPractice();}
   if(v === 'member') renderMember();
+  if(v === 'guest') { renderGuest(); refreshGuestCapture(); }
   if(v === 'track') renderTrackPage();
   if(v === 'decoder'){ segarkanDecoder(); renderDecoderLog(); }
   if(v === 'sound' && window.YurLapsSound) window.YurLapsSound.load();
@@ -473,7 +474,13 @@ function renderRoster(){
   const q = ($('rSearch').value || '').toLowerCase();
   const box = $('rRows');
   const dipilih = new Map(state.peserta.map(p => [p.memberId, p]));
+  const localTps = new Set(DATA.member.filter(m => ['local_guest','local'].includes(m.source))
+    .flatMap(m => (m.transponder||[]).map(String)));
+  const availableTps = m => m.source === 'guest'
+    ? (m.transponder||[]).filter(tp => !localTps.has(String(tp)))
+    : (m.transponder||[]);
   const rows = DATA.member.filter(m => {
+    if(m.status !== 'active' || !availableTps(m).length) return false;
     if(!q) return true;
     return (m.name + ' ' + m.nick + ' ' + (m.transponder || []).join(' '))
       .toLowerCase().includes(q);
@@ -481,18 +488,17 @@ function renderRoster(){
   box.innerHTML = rows.map(m => {
     const on = dipilih.has(m.id);
     const p = dipilih.get(m.id);
-    const tps = m.transponder || [];
-    const tp = p ? p.tp : (tps[0] == null ? '' : tps[0]);
-    const no = p ? p.no : '';
-    const sub = m.status === 'pending' ? '<span class="st-p pending">menunggu</span>'
-      : esc((m.mobil || '—') + ' · ' + (m.role || 'member'));
+    const tps = availableTps(m);
+    const tp = p ? p.tp : (tps.length === 1 ? String(tps[0]) : '');
+    const sub = m.source === 'cloud' || m.source === 'website' ? 'Member club' : 'Tamu';
+    const options = tps.map(id => {
+      const car = (m.transponder_details || []).find(v => String(v.transponder_id) === String(id)) || {};
+      return `<option value="${esc(id)}" ${String(tp) === String(id) ? 'selected' : ''}>${esc([car.rc_brand || m.mobil, car.rc_class || m.kelas, 'TP '+id].filter(Boolean).join(' · '))}</option>`;
+    }).join('');
     return `<div class="rrow ${on ? 'on' : ''}" data-id="${m.id}">
-      <input type="checkbox" ${on ? 'checked' : ''} ${m.status==='pending'?'disabled':''} data-chk>
-      <span class="nm"><b>${esc(m.name)}</b><small>${sub}${tps.length > 1
-        ? ' · ' + tps.length + ' transponder' : ''}${!m.tts_name?' · TTS belum diisi':''}</small></span>
-      <input type="number" min="1" max="99" value="${no}" placeholder="no" data-no>
-      <input type="text" value="${esc(p ? p.kelas : (m.kelas || ''))}" data-kelas>
-      <input type="text" value="${esc(tp)}" placeholder="transponder" data-tp>
+      <input type="checkbox" ${on ? 'checked' : ''} data-chk>
+      <span class="nm"><b>${esc(m.nick || m.name)}</b><small>${esc(sub)} · ${esc(m.name)}${!m.tts_name?' · TTS belum diisi':''}</small></span>
+      <select data-tp aria-label="Mobil ${esc(m.name)}"><option value="">${tps.length > 1 ? 'Pilih mobil' : 'Pilih transponder'}</option>${options}</select>
     </div>`;
   }).join('') || '<div class="note" style="padding:14px">Tidak ada member yang cocok.</div>';
 
@@ -502,54 +508,38 @@ function renderRoster(){
     const id = row.dataset.id;
     const m = DATA.member.find(x => x.id === id);
     const chk = row.querySelector('[data-chk]');
-    const inpNo = row.querySelector('[data-no]');
     const inpTp = row.querySelector('[data-tp]');
-    const inpKelas = row.querySelector('[data-kelas]');
-    [...row.querySelectorAll('input')].forEach(inp =>
+    [...row.querySelectorAll('input,select')].forEach(inp =>
       inp.onclick = e => e.stopPropagation());
 
     chk.onchange = () => {
       if(chk.checked){
-        const tps = m.transponder || [];
-        const tp = inpTp.value.trim() || (tps[0] == null ? '' : String(tps[0]));
-        const no = Number(inpNo.value) || (state.peserta.length + 1);
+        const tp = inpTp.value;
+        const no = state.peserta.length + 1;
         state.peserta.push({ uid:'', memberId:m.id, name:m.name, nick:m.nick,
-          kelas: inpKelas.value.trim() || m.kelas || '', tp, no, luar: false });
+          kelas: m.kelas || '', tp, no, luar: false });
       } else {
         state.peserta = state.peserta.filter(p => p.memberId !== m.id);
       }
       renderRoster();
     };
-    const ubah = () => {
+    inpTp.onchange = () => {
       const p = state.peserta.find(x => x.memberId === id);
       if(!p) return;
-      p.tp = inpTp.value.trim() || p.tp;
-      p.no = Number(inpNo.value) || p.no;
-      p.kelas = inpKelas.value.trim() || p.kelas;
+      p.tp = inpTp.value;
     };
-    inpTp.onchange = ubah; inpNo.onchange = ubah; inpKelas.onchange = ubah;
   });
 }
 $('rSearch').oninput = renderRoster;
-$('rAll').onclick = () => {
-  DATA.member.forEach(m => {
-    if(m.status==='pending')return;
-    // satu member hanya boleh muncul sekali di daftar peserta
-    if(state.peserta.some(p => p.memberId === m.id)) return;
-    const tps = m.transponder || [];
-    state.peserta.push({ uid:'', memberId:m.id, name:m.name, nick:m.nick,
-      kelas:m.kelas || '', tp: tps[0] == null ? '' : String(tps[0]),
-      no: state.peserta.length + 1, luar: false });
-  });
-  renderRoster();
-};
 $('rNone').onclick = () => { state.peserta = []; renderRoster(); };
 $('rCancel').onclick = () => {pulihkanPeserta();$('modalPeserta').hidden = true;};
 $('rSave').onclick = async () => {
+  const missing = state.peserta.find(p => !p.tp);
+  if(missing){ toast('Pilih mobil/transponder untuk '+(missing.nick||missing.name)); return; }
   state.peserta.sort((a,b) => a.no - b.no).forEach((p,i) => p.no = i+1);
   try{
     const r = await api('/api/race/peserta', { peserta: state.peserta.map(p => ({
-      member_id:p.memberId, no:p.no, name:p.name, nick:p.nick, kelas:p.kelas,
+      member_id:p.memberId, no:p.no, name:p.name, nick:p.nick,
       transponder:p.tp === '' ? null : Number(p.tp), luar:p.luar
     })) });
     sesi = r.race;
@@ -770,8 +760,8 @@ $('btnTrackSync').onclick = async () => {
    ========================================================================== */
 function renderMember(){
   const q = ($('memberSearch').value || '').toLowerCase();
-  const list = DATA.member.filter(m =>
-    !q || (m.name + ' ' + m.nick + ' ' + (m.transponder||[]).join(' ')).toLowerCase().includes(q));
+  const list = DATA.member.filter(m => ['cloud','website'].includes(m.source) &&
+    (!q || (m.name + ' ' + m.nick + ' ' + (m.transponder||[]).join(' ')).toLowerCase().includes(q)));
   $('memberList').innerHTML = list.map(m => `
     <div class="member">
       ${m.avatar_url&&/^https?:/.test(m.avatar_url)?`<img class="avatar" src="${esc(m.avatar_url)}" alt="" referrerpolicy="no-referrer">`:`<span class="avatar">${esc((m.nick || m.name).slice(0,2).toUpperCase())}</span>`}
@@ -780,18 +770,81 @@ function renderMember(){
         ? m.transponder.map(t=>{const car=(m.transponder_details||[]).find(v=>String(v.transponder_id)===String(t));return `<span class="tp">${esc(t)}${car?' · '+esc([car.rc_brand,car.rc_class].filter(Boolean).join(' / ')):''}</span>`;}).join('')
         : '<span style="font-size:10px">transponder belum dipetakan</span>'}<br>${
         esc([m.mobil, m.kelas, m.tts_name?'TTS: '+m.tts_name:'TTS belum diisi'].filter(Boolean).join(' · '))}</span>
-      <span class="role ${esc(m.role)}">${m.source==='guest'?'tamu akun':['website','cloud'].includes(m.source)?'akun club':'offline'}</span>${['cloud','website','guest'].includes(m.source)?'<span class="note">Kelola di website</span>':`<button class="btn sm" data-edit-member="${esc(m.id)}">Edit</button><button class="btn sm danger" data-delete-member="${esc(m.id)}">Hapus</button>`}
+      <span class="role ${esc(m.role)}">akun club</span><span class="note">Kelola di website</span>
       <span class="st-p ${m.status}">${m.status === 'active' ? 'aktif' : 'menunggu'}</span>
     </div>`).join('') || '<div class="empty">Tidak ada member yang cocok.</div>';
   $('memberCount').textContent = list.length + ' tampil';
   const clubName = (DATA.club && DATA.club.name) || 'Club';
   if ($('memberClubName')) $('memberClubName').textContent = clubName;
-  $('mActive').textContent  = DATA.member.filter(m => m.status === 'active').length;
-  $('mPending').textContent = DATA.member.filter(m => m.status === 'pending').length;
-  $('mTp').textContent = DATA.member.reduce((s,m) => s + (m.transponder||[]).length, 0);
+  $('mActive').textContent  = list.filter(m => m.status === 'active').length;
+  $('mPending').textContent = list.filter(m => m.status === 'pending').length;
+  $('mTp').textContent = list.reduce((s,m) => s + (m.transponder||[]).length, 0);
   $('mTrack').textContent = DATA.track.length;
 }
 $('memberSearch').oninput = renderMember;
+
+let capturedGuestTp = null;
+function renderGuest(){
+  const guests = DATA.member.filter(m => ['guest','local_guest','local'].includes(m.source));
+  const byTp = new Map();
+  guests.forEach(m => (m.transponder||[]).forEach(tp => {
+    const key=String(tp), row=byTp.get(key)||{};
+    row[m.source==='guest'?'account':'local'] = m;
+    byTp.set(key,row);
+  }));
+  $('guestCount').textContent = byTp.size+' tamu';
+  $('guestList').innerHTML = [...byTp].map(([tp,row]) => {
+    const m=row.local||row.account;
+    const conflict=row.local&&row.account;
+    return `<div class="member" style="gap:14px;flex-wrap:wrap">
+      <span class="avatar">${esc((m.nick||m.name).slice(0,2).toUpperCase())}</span>
+      <span class="who"><b>${esc(m.nick||m.name)}</b><span>${esc(m.name)} · TP ${esc(tp)}</span></span>
+      <span class="tps">${esc([m.mobil,m.kelas,'TTS: '+(m.tts_name||'—')].filter(Boolean).join(' · '))}</span>
+      <span class="role">${row.local?'Lokal':'Profil akun'}</span>
+      ${conflict?`<div style="width:100%;padding:10px;background:#f4f8fc;border-radius:8px">Profil akun ditemukan: <b>${esc(row.account.name)}</b> · ${esc(row.account.nick||'')} · TTS ${esc(row.account.tts_name||'—')}
+        <button class="btn sm" data-guest-resolve="${esc(tp)}" data-account-id="${esc(row.account.id)}">Gunakan profil akun</button></div>`:''}
+    </div>`;
+  }).join('') || '<div class="empty">Belum ada tamu. Tekan Tangkap transponder dan minta satu passing.</div>';
+}
+$('guestList').onclick=async e=>{
+  const b=e.target.closest('[data-guest-resolve]');if(!b)return;
+  try{const r=await api('/api/guest/resolve',{transponder:b.dataset.guestResolve,account_id:b.dataset.accountId});DATA.member=r.members;renderGuest();renderRoster();toast('Profil akun digunakan untuk sesi berikutnya');}
+  catch(err){gagal(err);}
+};
+$('guestCaptureStart').onclick=async()=>{
+  try{await api('/api/guest/capture/start',{});capturedGuestTp=null;$('guestCaptureBox').hidden=false;$('guestForm').hidden=true;$('guestCaptureState').textContent='Menunggu passing…';}
+  catch(err){gagal(err);}
+};
+$('guestCaptureCancel').onclick=()=>{$('guestCaptureBox').hidden=true;capturedGuestTp=null;};
+async function refreshGuestCapture(){
+  if($('view-guest').style.display==='none'||$('guestCaptureBox').hidden||capturedGuestTp)return;
+  try{
+    const r=await api('/api/guest/capture');
+    if(r.state==='idle'){$('guestCaptureState').textContent='Tidak ada passing dalam 30 detik.';return;}
+    if(r.state!=='captured')return;
+    capturedGuestTp=String(r.capture.transponder);
+    $('guestCapturedTp').textContent=capturedGuestTp;
+    const m=r.profile;
+    if(m && ['cloud','website','guest'].includes(m.source)){
+      $('guestCaptureState').textContent=(m.source==='guest'?'Profil tamu ditemukan: ':'Member club: ')+(m.nick||m.name);
+      $('guestForm').hidden=true;
+      await muatUlangData();renderGuest();return;
+    }
+    $('guestCaptureState').textContent='Transponder '+capturedGuestTp+' terbaca';
+    $('guestForm').hidden=false;
+    $('guestName').value=m?.name||'';$('guestNick').value=m?.nick||'';
+    $('guestTts').value=m?.tts_name||'';$('guestClass').value=m?.kelas||'';$('guestBrand').value=m?.mobil||'';
+  }catch(err){$('guestCaptureState').textContent=err.message;}
+}
+setInterval(refreshGuestCapture,1000);
+$('guestForm').onsubmit=async e=>{
+  e.preventDefault();if(!capturedGuestTp)return;
+  try{
+    const r=await api('/api/guest/save',{transponder:capturedGuestTp,name:$('guestName').value,
+      nick:$('guestNick').value,tts_name:$('guestTts').value,kelas:$('guestClass').value,mobil:$('guestBrand').value});
+    DATA.member=r.members;capturedGuestTp=null;$('guestCaptureBox').hidden=true;renderGuest();toast('Tamu disimpan');
+  }catch(err){gagal(err);}
+};
 
 let decOnline = false;
 let decoderBusy = false;
@@ -804,20 +857,16 @@ async function segarkanDecoder(){
     decOnline = !!d.online;
     $('decDev').textContent = 'YurLaps Decoder';
     $('decSelectedSerial').textContent = d.selected_serial || 'Belum dipilih';
-    $('decEndpoint').textContent = d.endpoint || 'tcp://127.0.0.1:5556';
-    if(document.activeElement !== $('decPortInput')) $('decPortInput').value = Number((d.endpoint || '').split(':').pop()) || 5556;
-    $('decPortInput').disabled = sedangJalan();
-    $('decPortSave').disabled = sedangJalan();
     const devices = d.devices || [];
     $('decSerialList').innerHTML = devices.length ? devices.map(device => {
       const serial = device.serial || '';
       const description = device.problem || (device.active ? 'Aktif otomatis saat tersambung' : 'Terdeteksi, belum aktif');
       return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #e8edf2;flex-wrap:wrap">
-        <div style="flex:1;min-width:180px"><b class="mono">${esc(serial || 'Serial tidak terbaca')}</b><small style="display:block;color:#64748b">${esc(device.name || 'RTL-SDR')} · ${esc(description)}</small></div>
+        <div style="flex:1;min-width:180px"><b class="mono">${esc(serial || 'ID belum terbaca')}</b><small style="display:block;color:#64748b">YurLaps Decoder · ${esc(description)}</small></div>
         <span class="note">Gain ${Number(device.gain ?? 20).toFixed(1)} dB</span>
         <button type="button" class="btn sm ${device.active ? '' : 'primary'}" data-dec-serial="${esc(serial)}" data-dec-enabled="${device.active ? 'false' : 'true'}" ${!device.selectable || sedangJalan() ? 'disabled' : ''}>${device.active ? 'Nonaktifkan' : 'Aktifkan decoder'}</button>
       </div>`;
-    }).join('') : '<div class="note">Belum ada RTL-SDR terdeteksi. Colok dongle dan periksa driver USB.</div>';
+    }).join('') : '<div class="note">Belum ada YurLaps Decoder terdeteksi.</div>';
     $('topDecoder').className='pill '+(decOnline?'online':'offline');
     $('topDecoderText').textContent=decOnline?'Decoder terhubung':'Decoder tidak terhubung';
     $('decLed').textContent = decOnline ? '● Data diterima' : manager.running ? '● Proses aktif · belum ada data' : '○ Tidak terhubung';
@@ -825,9 +874,9 @@ async function segarkanDecoder(){
     $('decRate').textContent = (d.counters || {}).P || 0;
     $('decNoise').textContent = decOnline && Number.isFinite(status.noise_power) ? status.noise_power.toFixed(1) : '—';
     $('decDiagnostic').textContent = decOnline
-      ? `Data YurLaps Decoder masuk · ${d.counters.P || 0} passing · ${d.counters.S || 0} status. Timestamp ${status.timecode ?? '—'} ms.`
-      : manager.running ? 'YurLaps Decoder berjalan dan menunggu data. Periksa koneksi USB; sambungan dicoba kembali otomatis.'
-      : (manager.last_error || 'Sambungkan YurLaps Decoder. Aplikasi akan menyalakan dan menghubungkannya otomatis.');
+      ? `Menerima passing · ${d.counters.P || 0} terbaca`
+      : manager.running ? 'Menunggu passing dari YurLaps Decoder.'
+      : 'YurLaps Decoder belum berjalan. Periksa perangkat dan driver USB.';
     const g = Number(d.gain ?? 20);
     $('decGain').textContent = g.toFixed(1) + ' dB';
     gainTersimpan = g;
@@ -860,16 +909,6 @@ $('decSerialList').onclick = async event => {
   }catch(err){gagal(err);}
   await segarkanDecoder();
 };
-$('decPortSave').onclick = async () => {
-  const port = Number($('decPortInput').value);
-  if(!Number.isInteger(port) || port < 1024 || port > 65535){toast('Port harus antara 1024 dan 65535.');return;}
-  try{
-    await api('/api/decoder/port', {port});
-    toast('Port ZeroMQ disimpan. Decoder menghubungkan ulang.');
-    await segarkanDecoder();
-  }catch(err){gagal(err);}
-};
-
 /* Gain: geser = angka di layar; lepas = konfirmasi lalu simpan.
    Tanpa jeda/debounce: satu gerakan = satu konfirmasi (sebelumnya konfirmasi
    bisa muncul dua kali karena nilai dikirim dari dua jalur). */
@@ -1177,7 +1216,7 @@ async function muatUlangData(){
 
 let clubRefreshBusy=false;
 async function refreshClub(){
-  if(clubRefreshBusy||!$('modalPeserta').hidden||!$('modalMember').hidden||!$('modalTrack').hidden||!$('modalSetting').hidden)return;
+  if(clubRefreshBusy||!$('modalPeserta').hidden||!$('modalTrack').hidden||!$('modalSetting').hidden)return;
   clubRefreshBusy=true;
   try{await muatUlangData();renderAll();if($('view-history').style.display!=='none')await renderHistory();}
   catch(e){/* Keep the last complete local snapshot and retry. */}
@@ -1324,29 +1363,6 @@ function reportCharts(drivers,cfg){
  }
  return chart('Position progression','pos')+chart('Gap to leader · seconds','gap')+`<section class="report-chart"><h3>Lap time distribution · medians</h3><svg viewBox="0 0 980 ${Math.max(100,pace.length*32+50)}">${distribution||'<text x="20" y="40">Belum ada lap penuh</text>'}</svg><p class="note">Rentang min–max, kotak kuartil 25–75%, garis median.</p></section>`;
 }
-let editMemberId=null;
-function openMember(id){
- const m=DATA.member.find(x=>x.id===id)||{};editMemberId=m.id||null;
- $('memberTitle').textContent=m.id?'Edit member':'Tambah member';
- [['memberName','name'],['memberNick','nick'],['memberClass','kelas'],['memberCar','mobil']].forEach(([id,k])=>$(id).value=m[k]||'');
- $('memberTts').value=m.tts_name||m.tts||'';
- $('memberTransponders').value=(m.transponder||[]).join(', ');$('modalMember').hidden=false;$('memberName').focus();
-}
-$('addMember').onclick=()=>openMember();
-$('importMembers').onclick=()=>$('memberFile').click();
-$('memberFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{
- const data=JSON.parse(await f.text());const result=await api('/api/members/import',{members:Array.isArray(data)?data:data.members});
- DATA.member=result.members;renderMember();toast(result.count+' member diimpor secara lokal');
- }catch(err){gagal(err);}finally{e.target.value='';}};
-$('memberCancel').onclick=()=>$('modalMember').hidden=true;
-$('memberForm').onsubmit=async e=>{
- e.preventDefault();try{
- const res=await api('/api/member',{id:editMemberId,name:$('memberName').value,nick:$('memberNick').value,kelas:$('memberClass').value,mobil:$('memberCar').value,transponder:$('memberTransponders').value,tts_name:$('memberTts').value.trim()});
- DATA.member=res.members;$('modalMember').hidden=true;renderMember();toast('Member tersimpan lokal');
- }catch(err){gagal(err);}
-};
-$('memberList').addEventListener('click',e=>{const b=e.target.closest('[data-edit-member]');if(b)openMember(b.dataset.editMember);});
-$('memberList').addEventListener('click',async e=>{const b=e.target.closest('[data-delete-member]');if(!b)return;const m=DATA.member.find(x=>x.id===b.dataset.deleteMember);if(!m||!confirm(`Hapus driver offline ${m.nick||m.name}?`))return;try{const r=await api('/api/member/delete',{id:m.id});DATA.member=r.members;renderMember();toast('Driver offline dihapus');}catch(err){gagal(err);}});
 let reportRaceId=null;
 $('sesiPdf').onclick=async()=>{
  if(!reportRaceId)return;

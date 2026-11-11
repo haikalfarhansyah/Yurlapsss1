@@ -125,14 +125,23 @@ class RaceEngine:
                 mid = source.get("member_id") or source.get("id") or ""
                 member = members.get(mid, {})
                 tp = source.get("transponder")
-                if tp in (None, ""):
-                    tp = next(iter(member.get("transponder") or []), None)
+                if mid and not member:
+                    raise ValueError("Peserta tidak ditemukan. Muat ulang daftar member/tamu.")
+                if tp in (None, "") and member:
+                    raise ValueError("Pilih mobil/transponder untuk setiap peserta")
                 try:
                     tp = int(tp) if tp not in (None, "") else None
                     if tp is not None and not 0 <= tp <= 4294967295:
                         raise ValueError()
                 except (TypeError, ValueError):
                     raise ValueError("ID transponder peserta tidak valid")
+                if member and str(tp) not in {str(x) for x in member.get("transponder", [])}:
+                    raise ValueError("Transponder tidak terdaftar pada peserta ini")
+                owner = self.store.member_for_transponder(tp) if member else None
+                if member and (not owner or owner["id"] != mid):
+                    raise ValueError("Identitas transponder berubah. Perbarui daftar tamu terlebih dahulu")
+                details = next((d for d in member.get("transponder_details", [])
+                                if str(d.get("transponder_id")) == str(tp)), {})
                 name = str(member.get("name") or source.get("name") or "").strip()
                 if not name:
                     raise ValueError("Nama peserta wajib diisi")
@@ -141,7 +150,8 @@ class RaceEngine:
                          name=name, nick=member.get("nick") or source.get("nick") or "",
                          tts_name=str(member.get("tts_name") or source.get("tts_name") or "").strip(),
                          avatar_url=member.get("avatar_url") or source.get("avatar_url") or "",
-                         kelas=source.get("kelas") or member.get("kelas") or "",
+                         kelas=details.get("rc_class") or member.get("kelas") or "",
+                         mobil=details.get("rc_brand") or member.get("mobil") or "",
                          transponder=tp, luar=not bool(member))
                 self._clear_driver(p)
                 out.append(p)

@@ -76,6 +76,13 @@ def refresh_members(store, club_id: str, client) -> int:
         conn.execute("DELETE FROM member WHERE source='cloud'")
         now = time.time()
         for m in members:
+            # A visitor may join the club while the application is offline.
+            # Replace the visitor cache and any local alias for the same car.
+            conn.execute("DELETE FROM member WHERE id=? AND source='guest'", (m["id"],))
+            for tp in m["transponder"]:
+                for row in list(conn.execute("SELECT id, transponder FROM member WHERE source IN ('local_guest','local')")):
+                    if str(tp) in {str(value) for value in json.loads(row["transponder"] or "[]")}:
+                        conn.execute("DELETE FROM member WHERE id=?", (row["id"],))
             conn.execute("INSERT INTO member (id, name, nick, kelas, mobil, role, status,"
                          " transponder, updated_at, tts_name, avatar_url, transponder_details, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'cloud')",
                          (m["id"], m["name"], m["nick"], m["kelas"], m["mobil"],

@@ -229,7 +229,7 @@
   .chipsel button.on{background:var(--blue-l);border-color:#bfe6f7;color:var(--blue)}
 
   /* peserta */
-  .rrow{display:grid;grid-template-columns:26px 1fr 88px 74px 108px;gap:9px;align-items:center;
+  .rrow{display:grid;grid-template-columns:26px minmax(150px,1fr) minmax(220px,1.3fr);gap:9px;align-items:center;
     padding:7px 6px;border-bottom:1px solid var(--line2);font-size:12.5px}
   .rrow:hover{background:#f9fcff}
   .rrow.on{background:var(--blue-xl)}
@@ -239,7 +239,7 @@
   .rrow input[type=text],.rrow input[type=number]{width:100%;border:1px solid var(--line);
     border-radius:6px;padding:5px 7px;font-size:11.5px;background:#fff}
   .rrow input[type=number]{font-family:'Cascadia Mono',Consolas,monospace}
-  .roster-head{display:grid;grid-template-columns:26px 1fr 88px 74px 108px;gap:9px;padding:0 6px 6px;
+  .roster-head{display:grid;grid-template-columns:26px minmax(150px,1fr) minmax(220px,1.3fr);gap:9px;padding:0 6px 6px;
     font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted2);font-weight:700;
     border-bottom:1px solid var(--line)}
   .rsearch{display:flex;gap:8px;margin-bottom:9px}
@@ -317,7 +317,7 @@
   @media (max-width:1000px){
     .grid{grid-template-columns:1fr} aside{display:none} .main{margin-left:0}
     .stat{grid-template-columns:repeat(2,1fr)}
-    .rrow,.roster-head{grid-template-columns:24px 1fr 70px 60px 92px;font-size:11.5px}
+    .rrow,.roster-head{grid-template-columns:24px minmax(100px,1fr) minmax(150px,1.2fr);font-size:11.5px}
   }
   /* --- History: kolom kanan jangan menimpa tabel, chip ringkasan rapi --- */
   .grid.histgrid{grid-template-columns:minmax(0,1fr) 300px}
@@ -424,6 +424,7 @@
       <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 11h5M18.5 8.5v5"/></svg> Member
     </button>
+    <button class="tab" data-view="guest"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3-7 8-7s8 3 8 7M17 5h5M19.5 2.5v5"/></svg> Tamu</button>
     <button class="tab" data-view="track">
       <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5 5c-4 0-4 14 0 14h4c4 0 2-6 6-6h3c5 0 5-8 0-8z"/></svg> Track
@@ -613,9 +614,8 @@
     <div class="page" id="view-member" style="display:none">
       <div class="head">
         <div><h1>Member</h1>
-          <div class="lead">Member club disinkronkan otomatis. Driver tamu dapat disimpan lokal saat offline.</div></div>
+          <div class="lead">Anggota club dari website.</div></div>
       </div>
-      <div style="display:flex;gap:8px;margin:12px 0"><button class="btn primary" id="addMember">+ Driver offline</button><button class="btn" id="importMembers">Impor member JSON</button><input id="memberFile" type="file" accept=".json,application/json" hidden></div>
       <div class="search">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -640,6 +640,24 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="page" id="view-guest" style="display:none">
+      <div class="head"><div><h1>Tamu</h1><div class="lead">Daftarkan dari passing decoder. Bisa digunakan saat offline.</div></div>
+        <button class="btn primary" id="guestCaptureStart" type="button">Tangkap transponder</button></div>
+      <div class="big" style="padding:16px;margin-bottom:14px" id="guestCaptureBox" hidden>
+        <b id="guestCaptureState">Menunggu passing…</b>
+        <form id="guestForm" hidden style="margin-top:13px">
+          <div class="two"><div class="field"><label>Transponder terbaca</label><b id="guestCapturedTp" class="mono">—</b></div>
+            <div class="field"><label for="guestName">Nama driver</label><input id="guestName" required maxlength="120"></div>
+            <div class="field"><label for="guestNick">Nick</label><input id="guestNick" maxlength="80"></div>
+            <div class="field"><label for="guestTts">Nama TTS</label><input id="guestTts" required maxlength="80"></div>
+            <div class="field"><label for="guestClass">Class</label><input id="guestClass" maxlength="80"></div>
+            <div class="field"><label for="guestBrand">Brand RC</label><input id="guestBrand" maxlength="80"></div></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="guestCaptureCancel">Batal</button><button class="btn primary" type="submit">Simpan tamu</button></div>
+        </form>
+      </div>
+      <div class="big"><div class="big-bar"><span>Driver tamu</span><span id="guestCount" style="margin-left:auto">0</span></div><div id="guestList" style="padding:0 15px"></div></div>
     </div>
 
     <!-- ==================== TRACK ==================== -->
@@ -723,7 +741,7 @@
     <!-- ==================== DECODER ==================== -->
     <div class="page" id="view-decoder" style="display:none">
       <div class="head">
-        <div><h1>Decoder</h1><div class="lead">Pilih RTL-SDR berdasarkan serial, lalu atur gain penerima.</div></div>
+        <div><h1>Decoder</h1><div class="lead">YurLaps Decoder</div></div>
         <div class="right">
           
           <button class="btn primary" id="btnDecStart">Mulai ulang</button>
@@ -739,9 +757,8 @@
       <div class="big" style="margin-bottom:16px;padding:16px"><div class="note" id="decDiagnostic">Menunggu YurLaps Decoder…</div>
         <svg id="noiseChart" viewBox="0 0 900 110" role="img" aria-label="Riwayat noise decoder" style="width:100%;height:110px;margin-top:10px"></svg></div>
       <div class="big" style="margin-bottom:13px">
-        <div class="big-bar"><span>RTL-SDR terpasang</span><span class="note" style="margin-left:auto">Satu decoder aktif</span></div>
+        <div class="big-bar"><span>YurLaps Decoder</span><span class="note" style="margin-left:auto">Satu decoder aktif</span></div>
         <div id="decSerialList" style="padding:14px 16px"></div>
-        <div class="note" style="padding:0 16px 14px">Aktifkan sekali untuk menyimpan serial. Saat dongle dengan serial itu dicolok lagi, YurLaps mencoba menjalankannya otomatis. Serial yang sama pada dua dongle tidak dapat dipilih.</div>
       </div>
       <div class="big" style="margin-bottom:13px">
         <div class="big-bar"><span>Pengaturan penerima</span>
@@ -756,11 +773,6 @@
           </div>
           <input type="range" id="gainRange" min="0" max="49.6" step="0.1" value="20"
                  style="width:100%;accent-color:var(--blue)">
-          <div class="note" style="margin-top:8px">
-            Gain terlalu tinggi membuat penerima jenuh (RSSI mentok, lintasan hilang);
-            terlalu rendah membuat mobil terlewat. Ubah saat <b>tidak ada sesi berjalan</b> —
-            YurLaps Decoder dijalankan ulang setelah nilai disimpan.
-          </div>
         </div>
       </div>
       <div class="grid">
@@ -773,12 +785,7 @@
         <div>
           <div class="side-card"><h3>Perangkat</h3>
             <div class="kv"><span>Decoder</span><b id="decDev">YurLaps Decoder</b></div>
-            <div class="kv"><span>Serial aktif</span><b id="decSelectedSerial">—</b></div>
-            <div class="kv"><span>Port ZeroMQ</span><b id="decEndpoint">tcp://127.0.0.1:5556</b></div>
-            <div style="display:flex;gap:6px;margin:10px 0"><input id="decPortInput" type="number" min="1024" max="65535" step="1" value="5556" aria-label="Port ZeroMQ" style="min-width:0;width:100%;padding:7px;border:1px solid #d9e2ea;border-radius:8px"><button class="btn sm" id="decPortSave" type="button">Simpan</button></div>
-            <div class="kv"><span>Versi</span><b>YurLaps Decoder</b></div>
-            <div class="note">Port adalah jalur data decoder ke aplikasi. Simpan saat tidak ada sesi berjalan; YurLaps menghubungkan ulang subscriber dan decoder bersama. Semua transponder yang terbaca muncul di log.</div></div>
-          <div class="side-card"><h3>Sumber waktu</h3><div class="note">Lap dan urutan lintasan memakai timestamp YurLaps Decoder. Nama diambil dari member lokal bila tersedia. Proses aktif belum berarti data radio diterima.</div></div>
+            <div class="kv"><span>Decoder ID</span><b id="decSelectedSerial">—</b></div></div>
         </div>
       </div>
     </div>
@@ -789,14 +796,13 @@
 <div class="modal" id="modalPeserta" hidden>
   <div class="dlg wide">
     <h2>Peserta Quick Race</h2>
-    <div class="sub">Pilih pembalap dari member club. Transponder terisi otomatis — bisa diubah kalau memakai transponder lain.</div>
+    <div class="sub">Pilih driver dan mobil yang dipakai. ID transponder mengikuti data member atau tamu.</div>
     <div class="rsearch">
       <input id="rSearch" placeholder="Cari nama, nick, atau transponder…">
-      <button class="btn sm" id="rAll">Pilih semua</button>
       <button class="btn sm" id="rNone">Kosongkan</button>
     </div>
     <div class="rlist">
-      <div class="roster-head"><span></span><span>Driver</span><span>No.</span><span>Kelas</span><span>Transponder</span></div>
+      <div class="roster-head"><span></span><span>Driver</span><span>Mobil / transponder</span></div>
       <div id="rRows"></div>
     </div>
     <div class="foot">
@@ -901,15 +907,6 @@
   </div>
 </div>
 
-<div class="modal" id="modalMember" hidden><form class="dlg" id="memberForm">
-<h2 id="memberTitle">Tambah member</h2><p class="sub">Disimpan di komputer ini, bisa dipakai tanpa website.</p>
-<label>Nama lengkap<input id="memberName" required maxlength="120"></label>
-<label>Nama panggilan<input id="memberNick" maxlength="80"></label>
-<label>Kelas<input id="memberClass" maxlength="80"></label>
-<label>Mobil<input id="memberCar" maxlength="80"></label>
-<label>ID transponder<input id="memberTransponders" placeholder="Contoh: 1615544, 1712003"></label>
-<p class="note">Pisahkan beberapa ID dengan koma. Boleh kosong jika belum memiliki transponder.</p>
-<div class="field"><label for="memberTts">Nama TTS (wajib)</label><input id="memberTts" required placeholder="Nama yang dibaca suara"></div><div class="foot"><button class="btn" id="memberCancel" type="button">Batal</button><button class="btn primary" type="submit">Simpan member</button></div></form></div>
 <div class="toast" id="toast"></div>
 
 <!-- ==================== ACCOUNT / FINISH ==================== -->

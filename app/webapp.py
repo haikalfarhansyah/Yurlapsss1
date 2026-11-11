@@ -96,6 +96,8 @@ class AppContext:
         self.decoder_client = None
         self.updater = None
         self.update_pending = False
+        self.guest_capture_until = 0.0
+        self.guest_capture_result = None
         from .practice import PracticeRecorder
         self.practice = PracticeRecorder(on_close=self._persist_practice,
                                          idle_seconds=getattr(cfg, "idle_split_seconds", 120))
@@ -108,8 +110,16 @@ class AppContext:
                                idle_seconds=getattr(self.cfg, "idle_split_seconds", 120))
             if event.get("kind") == "passing":
                 self.club.observe_transponder(event["transponder_id"])
+                capturing = (self.race.status == "idle" and
+                             time.monotonic() < self.guest_capture_until)
+                if capturing:
+                    self.guest_capture_until = 0.0
+                    self.guest_capture_result = {"transponder": int(event["transponder_id"]),
+                                                 "at": time.time()}
+                    if self._cloud is not None:
+                        self._cloud.wake.set()
                 practice_result = None
-                if self.race.status == "idle":
+                if self.race.status == "idle" and not capturing:
                     member = self.club.member_for_transponder(event.get("transponder_id"))
                     practice_result = self.practice.record(
                         event.get("transponder_id"), event.get("decoder_timecode"),
@@ -118,7 +128,7 @@ class AppContext:
                         dur_us=event.get("pass_duration_us"),
                     )
                     self._maybe_persist_practice()
-                result = self.race.catat(event["transponder_id"],
+                result = None if capturing else self.race.catat(event["transponder_id"],
                                          decoder_ts=event.get("decoder_timecode"),
                                          rssi=event.get("rssi"), hit_count=event.get("hit_count"),
                                          dur_us=event.get("pass_duration_us"))
@@ -130,7 +140,8 @@ class AppContext:
                                   "transponder_id": event.get("transponder_id"),
                                   "driver": event.get("driver") or "",
                                   "decoder_timecode": event.get("decoder_timecode"),
-                                  "result": practice_result if self.race.status == "idle" else (result or {})})
+                                  "result": ({"status": "registration", "skip": True} if capturing else
+                                             practice_result if self.race.status == "idle" else (result or {}))})
             elif event.get("kind") == "noise":
                 self.race.observe_clock(event.get("timecode"))
             elif event.get("kind") == "clock_reset":
@@ -488,6 +499,15 @@ def make_handler(ctx: AppContext):
             if path == "/api/members":
                 return self._json({"ok": True, "members": ctx.club.members()})
 
+            if path == "/api/guest/capture":
+                result = ctx.guest_capture_result
+                if result:
+                    member = ctx.club.member_for_transponder(result["transponder"])
+                    return self._json({"ok": True, "state": "captured", "capture": result,
+                                       "profile": member})
+                return self._json({"ok": True,
+                                   "state": "waiting" if time.monotonic() < ctx.guest_capture_until else "idle"})
+
             if path == "/api/presets":
                 return self._json({"ok": True, "presets": ctx.club.presets()})
 
@@ -691,6 +711,36 @@ def make_handler(ctx: AppContext):
                 member_id = str(data.get("id") or "")
                 if not ctx.club.delete_member(member_id):
                     return self._err(403, "Member online dikelola dari website dan tidak dapat dihapus di aplikasi")
+                return self._json({"ok": True, "members": ctx.club.members()})
+
+            if path == "/api/guest/capture/start":
+                if ctx.race.status != "idle":
+                    return self._err(409, "Tangkap transponder hanya tersedia saat tidak ada race")
+                with ctx._club_lock:
+                    ctx.guest_capture_result = None
+                    ctx.guest_capture_until = time.monotonic() + 30.0
+                return self._json({"ok": True, "state": "waiting"})
+
+            if path == "/api/guest/save":
+                captured = ctx.guest_capture_result
+                if not captured or str(captured["transponder"]) != str(data.get("transponder")):
+                    return self._err(409, "Tangkap transponder terlebih dahulu")
+                try:
+                    guest = ctx.club.save_local_guest(captured["transponder"], data.get("name"),
+                                                      data.get("tts_name"), data.get("nick", ""),
+                                                      data.get("kelas", ""), data.get("mobil", ""))
+                except (ValueError, TypeError) as exc:
+                    return self._err(400, str(exc))
+                ctx.guest_capture_result = None
+                return self._json({"ok": True, "guest": guest, "members": ctx.club.members()})
+
+            if path == "/api/guest/resolve":
+                if ctx.race.status != "idle":
+                    return self._err(409, "Selesaikan race sebelum mengubah identitas tamu")
+                try:
+                    ctx.club.resolve_local_guest(data.get("transponder"), str(data.get("account_id") or ""))
+                except (ValueError, TypeError) as exc:
+                    return self._err(400, str(exc))
                 return self._json({"ok": True, "members": ctx.club.members()})
 
             if path == "/api/race/track":
@@ -1010,37 +1060,8 @@ def make_handler(ctx: AppContext):
                 engine.log("info", f"Perangkat: {info.message}")
                 return self._json({"ok": True, "device": info.to_dict()})
 
-            if path in ("/api/decoder/gain", "/api/decoder/restart", "/api/decoder/select", "/api/decoder/port") and ctx.race.status in ("live", "countdown", "paused"):
+            if path in ("/api/decoder/gain", "/api/decoder/restart", "/api/decoder/select") and ctx.race.status in ("live", "countdown", "paused"):
                 return self._err(409, "Selesaikan sesi sebelum mengubah gain atau restart decoder.")
-
-            if path == "/api/decoder/port":
-                try:
-                    port = int(data.get("port"))
-                except (TypeError, ValueError):
-                    return self._err(400, "Port ZeroMQ harus berupa angka.")
-                if not 1024 <= port <= 65535:
-                    return self._err(400, "Port ZeroMQ harus antara 1024 dan 65535.")
-                endpoint = f"tcp://127.0.0.1:{port}"
-                if endpoint != cfg.zmq_endpoint:
-                    if ctx.decoder_manager is not None and ctx.decoder_manager.status.mode == "external":
-                        return self._err(409, "Tutup decoder eksternal sebelum mengganti port.")
-                    old = ctx.decoder_client
-                    if old is None:
-                        return self._err(503, "Subscriber ZeroMQ belum aktif.")
-                    old.stop()
-                    old.join(timeout=3)
-                    if old.is_alive():
-                        return self._err(503, "Subscriber lama belum berhenti; port tidak diubah.")
-                    from .decoder import DecoderClient
-                    new_client = DecoderClient(engine, endpoint)
-                    cfg.zmq_endpoint = endpoint
-                    cfg.save()
-                    ctx.decoder_client = new_client
-                    engine.decoder_online = False
-                    new_client.start()
-                    if ctx.decoder_manager is not None:
-                        ctx.decoder_manager.restart_now(reason=f"port ZeroMQ {port}")
-                return self._json({"ok": True, "port": port, "endpoint": endpoint})
 
             if path == "/api/decoder/select":
                 serial = str(data.get("serial") or "").strip()
@@ -1051,7 +1072,7 @@ def make_handler(ctx: AppContext):
                 devices = list_sdr_devices(cfg.driver_vid, cfg.driver_pid)
                 found = next((d for d in devices if d["serial"] == serial), None)
                 if enabled and (not found or not found["selectable"]):
-                    return self._err(400, "Serial unik belum terbaca. Periksa perangkat dan driver RTL-SDR.")
+                    return self._err(400, "Decoder ID belum terbaca. Periksa perangkat dan driver USB.")
                 if enabled:
                     try:
                         gain = float(data.get("gain", cfg.decoder_devices.get(serial, {}).get("gain", cfg.decoder_gain)))

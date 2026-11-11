@@ -24,7 +24,8 @@ class OfflineRaceTests(unittest.TestCase):
                                'loop_width_m':.3,'min_lap_ms':1500})
         self.engine=Engine(Config());self.ctx=AppContext(self.engine.cfg,self.engine,None,EventBus())
         self.ctx._club=self.store;self.race=self.ctx.race;self.decoder=DecoderClient(self.engine,'inproc://test')
-        self.race.set_peserta([{'member_id':'Alpha'},{'member_id':'Beta'}])
+        self.race.set_peserta([{'member_id':'Alpha','transponder':11},
+                              {'member_id':'Beta','transponder':22}])
         self.race.set_cfg({'target':'laps','value':3,'start_mode':'grid','cd':0})
 
     def status(self,ts):self.decoder._dispatch_message(f'S {ts} -41.25 5.08 77 52')
@@ -39,6 +40,16 @@ class OfflineRaceTests(unittest.TestCase):
         self.assertEqual(self.engine.pass_log[-1]['transponder_id'],99999)
         self.assertEqual(self.race.log[0]['hit_count'],64)
         self.assertEqual(len(self.store.members()),2)
+
+    def test_two_cars_require_explicit_choice_and_cannot_swap_owner(self):
+        self.store.save_member({'id':'Alpha','name':'Alpha','transponder':[11,33]})
+        with self.assertRaisesRegex(ValueError, 'Pilih mobil'):
+            self.race.set_peserta([{'member_id':'Alpha'}])
+        with self.assertRaisesRegex(ValueError, 'tidak terdaftar'):
+            self.race.set_peserta([{'member_id':'Alpha','transponder':22}])
+        selected = self.race.set_peserta([{'member_id':'Alpha','transponder':33}])
+        self.assertEqual(selected[0]['transponder'],33)
+        self.assertEqual(selected[0]['name'],'Alpha')
 
     def test_decoder_reaches_race_using_timestamp_not_arrival_time(self):
         self.go();self.passing(11000);self.passing(21234)
