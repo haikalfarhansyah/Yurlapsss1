@@ -144,6 +144,21 @@ document.addEventListener('click',async event=>{
   }
 });
 $('eventEntryMember').onchange=renderCars;
+$('eventSyncNow').onclick=async()=>{
+  try{
+    const response=await api('/api/cloud/sync',{});
+    if(!response.cloud?.user_id)throw Error('Login ke akun YurLaps untuk mengambil Event dari website.');
+    $('eventSyncNow').disabled=true;
+    $('eventSyncNow').textContent='Sinkronisasi…';
+    for(const delay of [1500,3000,5000]){
+      await new Promise(resolve=>setTimeout(resolve,delay));
+      await load(selected?.id);
+    }
+  }catch(error){fail(error);}finally{
+    $('eventSyncNow').disabled=false;
+    $('eventSyncNow').textContent='Ambil dari website';
+  }
+};
 $('eventStageClass').onchange=renderStageEntries;
 $('eventStageStart').onchange=()=>{$('eventStageRank').value=$('eventStageStart').value==='grid'?'position':'result';};
 $('eventStageKind').onchange=()=>{

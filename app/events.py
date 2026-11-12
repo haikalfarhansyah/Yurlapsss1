@@ -324,6 +324,10 @@ class EventStore:
         return next(((event, stage) for event in self.list()
                      for stage in event["stages"] if stage["status"] == "live"), None)
 
+    def stage_for_race(self, race_id):
+        return next(((event, stage) for event in self.list()
+                     for stage in event["stages"] if stage.get("race_id") == race_id), None)
+
     def results(self, event_id):
         event = self.get(event_id)
         output = []

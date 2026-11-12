@@ -33,7 +33,8 @@ DEFAULT_WEBSITE = "https://yurlaps.dpdns.org"
 
 
 class CloudService:
-    def __init__(self, data_dir, on_switch=None, can_refresh=None, client_factory=SupabaseRaceClient):
+    def __init__(self, data_dir, on_switch=None, can_refresh=None, client_factory=SupabaseRaceClient,
+                 live_snapshot=None):
         self.root = Path(data_dir)
         self.credentials = CredentialStore(self.root / "cloud-session.json")
         self.state = self.credentials.load()
@@ -46,6 +47,9 @@ class CloudService:
         if self.state.get("project_url") != self.url:
             self.state = {}
         self.client_factory = client_factory
+        self.live_snapshot = live_snapshot
+        self.live_thread = None
+        self.last_live_error = None
         self.on_switch = on_switch or (lambda path: None)
         self.can_refresh = can_refresh or (lambda path: True)
         self.operation = threading.RLock()
@@ -340,6 +344,28 @@ class CloudService:
             return
         self.thread = threading.Thread(target=self._run, name="club-sync", daemon=True)
         self.thread.start()
+        if self.live_snapshot is not None:
+            self.live_thread = threading.Thread(target=self._run_live, name="club-live", daemon=True)
+            self.live_thread.start()
+
+    def _run_live(self):
+        while not self.stopped.is_set():
+            retry_seconds = 2
+            try:
+                if self.state.get("refresh_token") and self.state.get("selected_club"):
+                    with self.operation:
+                        club_id = self.state.get("selected_club")
+                        client = self._client()
+                        mode, payload = self.live_snapshot()
+                        receipt = client._request("/rest/v1/rpc/desktop_publish_club_live", "POST", {
+                            "p_club_id": club_id, "p_mode": mode, "p_payload": payload})
+                        if not isinstance(receipt, dict) or receipt.get("club_id") != club_id:
+                            raise ValueError("Konfirmasi Live tidak valid")
+                        self.last_live_error = None
+            except Exception as exc:
+                self.last_live_error = str(exc)
+                retry_seconds = 15
+            self.stopped.wait(retry_seconds)
 
     def _run(self):
         while not self.stopped.is_set():

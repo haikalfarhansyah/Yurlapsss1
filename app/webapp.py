@@ -248,8 +248,20 @@ class AppContext:
             if self._cloud is None:
                 from .cloud import CloudService
                 from .config import default_data_dir
-                self._cloud = CloudService(default_data_dir(), self.switch_database, self.can_refresh)
+                self._cloud = CloudService(default_data_dir(), self.switch_database, self.can_refresh,
+                                           live_snapshot=self.public_live_snapshot)
             return self._cloud
+
+    def public_live_snapshot(self):
+        from .events import EventStore
+        from .live import live_payload
+        with self._club_lock:
+            race = self.race.snapshot()
+            events = EventStore(self.club)
+            stage = events.live_stage() or (events.stage_for_race(race.get("saved_id"))
+                                            if race.get("saved_id") else None)
+            return live_payload(race, stage, self.practice.snapshot(),
+                                self.cfg.track_name, finished_at=self.race.akhir_wall)
 
     def switch_database(self, path):
         from .club import ClubStore
