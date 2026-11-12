@@ -105,6 +105,24 @@
     letter-spacing:0;font-weight:500}
   .empty{text-align:center;padding:26px 10px;color:var(--muted)}
   .empty b{display:block;color:var(--ink);font-size:14px;margin-bottom:4px}
+  .event-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:10px 0 17px}
+  .event-tabs button{padding:10px 14px;border-bottom:2px solid transparent;font-weight:600;color:var(--muted)}
+  .event-tabs button.on{border-color:var(--blue);color:var(--ink)}
+  .event-layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:15px}
+  .event-list{display:grid;gap:8px}
+  .event-item{display:block;width:100%;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:#fff}
+  .event-item:hover,.event-item.on{border-color:var(--blue);background:var(--blue-xl)}
+  .event-item b,.event-item small{display:block}.event-item small{color:var(--muted);margin-top:3px}
+  .event-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line2)}
+  .event-row:last-child{border-bottom:0}.event-row .actions{display:flex;gap:5px;flex-wrap:wrap}
+  .event-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .event-form label{display:block;font-size:12px;font-weight:600;color:var(--ink)}
+  .event-form input,.event-form select{display:block;width:100%;margin-top:5px;padding:9px;border:1px solid var(--line);border-radius:7px;background:#fff}
+  .event-form .wide{grid-column:1/-1}.event-form .foot{grid-column:1/-1;display:flex;justify-content:flex-end}
+  .event-board{overflow-x:auto}.event-board table{min-width:600px}
+  .event-board td:first-child{font-weight:600;color:var(--ink)}
+  .event-muted{color:var(--muted);font-size:12px}.event-status{font-size:11px;font-weight:700;color:var(--blue)}
+  @media(max-width:900px){.event-layout{grid-template-columns:1fr}.event-form{grid-template-columns:1fr}}
 
   /* ---------- track + preset bar ---------- */
   .barrow{display:flex;align-items:center;gap:13px;background:#fff;border:1px solid var(--line);
@@ -356,6 +374,7 @@
   #view-quickrace .grid>div:last-child{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.65fr);gap:16px}
   #detailCard .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
   @media(max-width:1000px){aside{display:flex;inset:auto 0 0 0;width:100%;height:58px;padding:6px;flex-direction:row;border-top:1px solid #e2e8f0}aside .brand,aside .tag,aside .aside-foot{display:none}aside .tab{justify-content:center;padding:8px;font-size:11px;gap:5px;margin:0}.main{padding-bottom:72px}#view-quickrace .grid>div:last-child{grid-template-columns:1fr}}
+  @media(max-width:1000px){aside{overflow-x:auto;overflow-y:hidden}aside .tab{flex:0 0 auto}}
 
   /* ---------- realtime refresh ---------- */
   .startup-splash{position:fixed;inset:0;z-index:200;background:linear-gradient(135deg,#08283e,#0b6685 55%,#10a7d4);display:grid;place-items:center;align-content:center;color:#fff;gap:10px;animation:splashIn .35s ease-out}
@@ -414,6 +433,9 @@
     <button class="tab on" data-view="quickrace">
       <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5 21V4l7 4 7-4v11l-7 4-7-2z"/></svg> Quick Race
+    </button>
+    <button class="tab" data-view="event">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v14H4zM8 3v4M16 3v4M4 10h16M8 14h3M14 14h3"/></svg> Event
     </button>
     <button class="tab" data-view="history">
       <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
@@ -568,6 +590,50 @@
         </div>
         <div class="side-card practice-session-card"><h3>Session log per member <span id="practiceSessionCount">0 sesi</span></h3><div id="practiceSessions" class="practice-sessions"></div></div>
       </div>
+    </div>
+
+    <!-- ==================== EVENT ==================== -->
+    <div class="page" id="view-event" style="display:none">
+      <div class="head"><div><h1>Event</h1><div class="lead">Pendaftaran, jadwal sesi, timing, dan hasil dalam satu tempat.</div></div></div>
+      <div class="event-tabs" role="tablist" aria-label="Bagian Event">
+        <button type="button" data-event-tab="active" class="on">Event aktif</button>
+        <button type="button" data-event-tab="create">Buat event</button>
+        <button type="button" data-event-tab="history">Riwayat event</button>
+      </div>
+      <section id="event-active">
+        <div class="event-layout"><div>
+          <div class="card"><div class="event-row"><h2 id="eventTitle" style="font-size:18px">Pilih event</h2><span id="eventState" class="event-status"></span></div><div id="eventMeta" class="event-muted"></div><div id="eventSync" class="event-muted"></div><div class="event-row"><div id="eventActions" class="actions"></div></div></div>
+          <div class="card"><h3>Pendaftaran dan check-in</h3><div id="eventEntries"></div>
+            <form id="eventEntryForm" class="event-form"><label>Kelas<select id="eventEntryClass" required></select></label><label>Pembalap<select id="eventEntryMember" required></select></label><label>Mobil / transponder<select id="eventEntryCar" required></select></label><div class="foot"><button class="btn primary" type="submit">Tambah peserta</button></div></form>
+          </div>
+          <div class="card"><h3>Jadwal sesi</h3><div id="eventStages"></div>
+            <form id="eventStageForm" class="event-form">
+              <label>Kelas<select id="eventStageClass" required></select></label>
+              <label>Jenis sesi<select id="eventStageKind"><option value="qualifying">Kualifikasi</option><option value="heat">Heat</option><option value="main">Main</option><option value="final">Final</option><option value="practice">Practice terjadwal</option></select></label>
+              <label>Nama sesi<input id="eventStageName" placeholder="Contoh: Kualifikasi R1" required></label>
+              <label>Grup<input id="eventStageGroup" value="Semua" required></label>
+              <label class="wide">Salin pengaturan dari preset (opsional)<select id="eventStagePreset"><option value="">Atur langsung di bawah</option></select></label>
+              <label>Target<select id="eventStageTarget"><option value="time">Waktu</option><option value="laps">Lap</option></select></label>
+              <label>Nilai target (detik atau lap)<input id="eventStageValue" type="number" min="1" value="180" required></label>
+              <label>Start<select id="eventStageStart"><option value="grid">Grid</option><option value="staggered">Staggered</option></select></label>
+              <label>Penilaian<select id="eventStageRank"><option value="position">Posisi lintasan</option><option value="result">Lap dan total waktu</option><option value="best">Best lap</option><option value="top3">Rata-rata 3 lap</option><option value="consecutive">3 lap berurutan</option></select></label>
+              <label>Countdown (detik)<input id="eventStageCountdown" type="number" min="0" max="60" value="5"></label>
+              <label>Random delay maksimal (2–4 detik)<input id="eventStageDelay" type="number" min="2" max="4" value="2"></label>
+              <label>Jeda angka countdown (ms)<input id="eventStageStep" type="number" min="1000" max="3000" value="1500"></label>
+              <label>Jeda panggilan staggered (detik)<input id="eventStageGap" type="number" min="1" value="10"></label>
+              <label>Mode staggered<select id="eventStageStagger"><option value="manual">Manual / by passing</option><option value="auto">Panggilan otomatis</option></select></label>
+              <label class="wide"><input id="eventStageFinishLap" type="checkbox" style="display:inline;width:auto;margin-right:6px">Jika target waktu habis, selesaikan lap yang sedang berjalan</label>
+              <div class="wide"><span class="event-muted">Kosongkan pilihan untuk semua peserta kelas; pilih peserta bila sesi dibagi per grup.</span><div id="eventStageEntries"></div></div>
+              <div class="foot"><button class="btn" type="submit">Tambahkan sesi</button></div>
+            </form>
+          </div>
+          <div class="card"><h3>Hasil event</h3><div id="eventResults"></div></div>
+        </div><div><div class="side-card"><h3>Pilih event</h3><div id="eventActiveList" class="event-list"></div></div><div class="side-card"><h3>Timing sesi</h3><div id="eventLive"></div></div></div></div>
+      </section>
+      <section id="event-create" hidden><div class="card"><h2 style="font-size:17px;margin-bottom:12px">Buat event baru</h2>
+        <form id="eventCreateForm" class="event-form"><label>Nama event<input id="eventName" required maxlength="100"></label><label>Tanggal<input id="eventDate" type="date" required></label><label>Track<select id="eventTrack" required></select></label><label>Format<select id="eventFormat"><option value="qualifying_main">Kualifikasi → Main</option><option value="heat_final">Heat → Final</option></select></label><label class="wide">Kelas (pisahkan dengan koma)<input id="eventClasses" placeholder="Contoh: 1/10 Buggy, 1/8 Buggy" required></label><label>Leg terbaik dihitung<input id="eventBestLegs" type="number" min="1" max="10" value="1" required></label><label class="wide">Poin per posisi (pisahkan dengan koma)<input id="eventPoints" value="25,18,15,12,10,8,6,4,2,1" required></label><div class="foot"><button class="btn primary" type="submit">Simpan event</button></div></form>
+      </div></section>
+      <section id="event-history" hidden><div class="event-layout"><div><div id="eventHistoryDetail" class="card"></div></div><div id="eventHistoryList" class="event-list"></div></div></section>
     </div>
 
     <!-- ==================== HISTORY RACE ==================== -->
@@ -935,6 +1001,6 @@
 </div>
 
 <div class="modal" id="modalUpdates" hidden><div class="dlg"><h2>Pembaruan YurLaps</h2><p class="sub" id="updateVersion"></p><p id="updateStatus" role="status">Memuat status pembaruan…</p><progress id="updateProgress" max="100" value="0" hidden style="width:100%"></progress><p class="note" id="updateNotes" style="white-space:pre-wrap"></p><p class="note">Pembaruan diunduh dari website YurLaps. Data lokal tetap tersimpan. Pasang pembaruan setelah race selesai.</p><div class="foot"><button class="btn" id="updateClose">Tutup</button><button class="btn primary" id="updateAction">Cek pembaruan</button></div></div></div>
-<script src="/static/quickrace.js"></script><script src="/static/sounds.js"></script><script src="/static/updates.js"></script>
+<script src="/static/quickrace.js"></script><script src="/static/event.js"></script><script src="/static/sounds.js"></script><script src="/static/updates.js"></script>
 </body>
 </html>

@@ -31,6 +31,7 @@ from .config import APP_VERSION, Config
 from .engine import Engine
 from .net import lan_urls
 from .race_upload import UploadError
+from .events import EventStore
 
 def _static_dir() -> Path:
     """Folder UI web. Saat dibundel PyInstaller, file UI ada di _internal/app/static."""
@@ -491,6 +492,8 @@ def make_handler(ctx: AppContext):
                     "ringkasan": ctx.club.ringkasan(),
                     "race": ctx.race.snapshot(),
                     "practice": ctx.practice.snapshot(),
+                    "active_event": (lambda active: {"event_id": active[0]["id"],
+                        "stage_id": active[1]["id"]} if active else None)(EventStore(ctx.club).live_stage()),
                 })
 
             if path == "/api/tracks":
@@ -510,6 +513,20 @@ def make_handler(ctx: AppContext):
 
             if path == "/api/presets":
                 return self._json({"ok": True, "presets": ctx.club.presets()})
+
+            if path == "/api/event/list":
+                return self._json({"ok": True, "events": EventStore(ctx.club).list()})
+            if path == "/api/event/detail":
+                try:
+                    event_id = (qs.get("id") or [""])[0]
+                    store = EventStore(ctx.club)
+                    return self._json({"ok": True, "event": store.get(event_id),
+                                       "results": store.results(event_id),
+                                       "standings": store.standings(event_id),
+                                       "sync": store.sync_state(event_id),
+                                       "race": ctx.race.snapshot()})
+                except ValueError as exc:
+                    return self._err(404, str(exc))
 
             if path == "/api/race/state":
                 ctx.race.cek_waktu()
@@ -692,6 +709,93 @@ def make_handler(ctx: AppContext):
                 cfg.save()
                 return self._json({"ok": True, "file": "custom", "url": "/api/sound/horn"})
 
+            if path.startswith("/api/event/"):
+                store = EventStore(ctx.club)
+                try:
+                    if path == "/api/event/create":
+                        event = store.create(data)
+                        return self._json({"ok": True, "event": event})
+                    event_id = str(data.get("event_id") or "")
+                    if path == "/api/event/status":
+                        return self._json({"ok": True, "event": store.set_status(event_id, data.get("status"))})
+                    if path == "/api/event/resolve":
+                        event = store.resolve_sync_conflict(event_id, data.get("choice"))
+                        ctx.cloud.wake.set()
+                        return self._json({"ok": True, "event": event})
+                    if path == "/api/event/entry/add":
+                        return self._json({"ok": True, "entry": store.add_entry(event_id, data)})
+                    if path == "/api/event/entry/set":
+                        return self._json({"ok": True, "entry": store.set_entry(
+                            event_id, str(data.get("entry_id") or ""),
+                            approved=data.get("approved"), checked_in=data.get("checked_in"))})
+                    if path == "/api/event/entry/remove":
+                        return self._json({"ok": True, "event": store.remove_entry(
+                            event_id, str(data.get("entry_id") or ""))})
+                    if path == "/api/event/entry/reconcile":
+                        return self._json({"ok": True, "entry": store.reconcile_entry(
+                            event_id, str(data.get("entry_id") or ""))})
+                    if path == "/api/event/stage/add":
+                        return self._json({"ok": True, "stage": store.add_stage(event_id, data)})
+                    if path == "/api/event/stage/remove":
+                        return self._json({"ok": True, "event": store.remove_stage(
+                            event_id, str(data.get("stage_id") or ""))})
+                    if path == "/api/event/stage/start":
+                        stage_id = str(data.get("stage_id") or "")
+                        event, stage = store.stage(event_id, stage_id)
+                        if event["status"] != "running" or stage["status"] != "planned":
+                            raise ValueError("Event atau sesi belum siap dijalankan")
+                        if ctx.race.status != "idle":
+                            raise ValueError("Selesaikan dan reset sesi timing sebelumnya")
+                        chosen = set(stage["entry_ids"])
+                        entries = [e for e in event["entries"] if e["class_id"] == stage["class_id"]
+                                   and (not chosen or e["id"] in chosen)
+                                   and e["approved"] and e["checked_in"]]
+                        if not entries:
+                            raise ValueError("Belum ada peserta kelas/grup yang disetujui dan check-in")
+                        members_by_id = {m["id"]: m for m in ctx.club.members()}
+                        for entry in entries:
+                            current = members_by_id.get(entry["member_id"])
+                            if not current or str(entry["transponder"]) not in {str(tp) for tp in current["transponder"]}:
+                                raise ValueError("Identitas peserta berubah. Cocokkan akun di menu Event lalu setujui lagi.")
+                        with ctx._club_lock:
+                            ctx.race.set_track(event["track_id"])
+                            ctx.race.set_cfg(stage["cfg"])
+                            ctx.race.set_peserta([{"member_id": e["member_id"],
+                                                   "transponder": e["transponder"]} for e in entries])
+                            race = ctx.race.mulai()
+                            store.mark_stage(event_id, stage_id, "live")
+                        return self._json({"ok": True, "race": race})
+                    if path == "/api/event/stage/save":
+                        stage_id = str(data.get("stage_id") or "")
+                        event, stage = store.stage(event_id, stage_id)
+                        if stage["status"] != "live":
+                            raise ValueError("Sesi belum berjalan")
+                        with ctx._club_lock:
+                            result = ctx.race.simpan(stage["name"] + " · " + event["name"])
+                            store.mark_stage(event_id, stage_id, "saved", result["id"])
+                            ctx.cloud.wake.set()
+                        return self._json({"ok": True, "result": result})
+                    if path == "/api/event/stage/reset":
+                        event, stage = store.stage(event_id, str(data.get("stage_id") or ""))
+                        if stage["status"] != "saved":
+                            raise ValueError("Simpan hasil sesi sebelum reset")
+                        return self._json({"ok": True, "race": ctx.race.reset()})
+                    if path == "/api/event/stage/retry":
+                        if ctx.race.status != "idle":
+                            raise ValueError("Sesi timing masih aktif; selesaikan dahulu")
+                        return self._json({"ok": True, "stage": store.retry_interrupted_stage(
+                            event_id, str(data.get("stage_id") or ""))})
+                    return self._err(404, "Rute event tidak ditemukan")
+                except (ValueError, TypeError, KeyError) as exc:
+                    return self._err(409, str(exc))
+
+            # An Event owns the shared timing engine until its active stage is saved.
+            if path in ("/api/race/track", "/api/race/cfg", "/api/race/peserta",
+                        "/api/race/start", "/api/race/go", "/api/race/resume",
+                        "/api/race/finish", "/api/race/reset", "/api/race/save",
+                        "/api/race/discard") and EventStore(ctx.club).live_stage():
+                return self._err(409, "Sesi Event sedang memakai timing. Buka menu Event.")
+
             # ---------------- Quick Race (offline) ----------------
             if path == "/api/members/import":
                 try:
@@ -849,6 +953,8 @@ def make_handler(ctx: AppContext):
                 rid = str(data.get("id") or "")
                 if not rid:
                     return self._err(400, "id sesi wajib")
+                if EventStore(ctx.club).race_is_linked(rid):
+                    return self._err(409, "Hasil ini bagian dari Event dan tidak bisa dihapus dari History Race")
                 ok = ctx.club.hapus_race(rid)
                 if not ok:
                     return self._err(404, "Sesi tidak ditemukan")

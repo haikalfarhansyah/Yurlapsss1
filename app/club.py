@@ -32,7 +32,7 @@ from typing import Optional
 
 from .config import default_data_dir
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 11
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -157,6 +157,16 @@ CREATE TABLE IF NOT EXISTS race_deletion (
     remote_id TEXT,
     deleted_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS event_meet (
+    id TEXT PRIMARY KEY,
+    club_id TEXT,
+    document_json TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    remote_revision INTEGER NOT NULL DEFAULT 0,
+    synced_revision INTEGER NOT NULL DEFAULT 0,
+    sync_error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_event_meet_club ON event_meet(club_id, updated_at);
 """
 
 def locked(method):
@@ -221,6 +231,9 @@ class ClubStore:
                            "ended_at": "REAL", "visibility": "TEXT NOT NULL DEFAULT 'private'",
                            "sync": "TEXT NOT NULL DEFAULT 'belum'", "result_json": "TEXT NOT NULL DEFAULT '{}'",
                            "revision": "INTEGER NOT NULL DEFAULT 1"},
+                "event_meet": {"remote_revision": "INTEGER NOT NULL DEFAULT 0",
+                               "synced_revision": "INTEGER NOT NULL DEFAULT 0",
+                               "sync_error": "TEXT"},
             }
             for table, columns in additions.items():
                 present = {r[1] for r in conn.execute("PRAGMA table_info(" + table + ")")}

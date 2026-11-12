@@ -24,6 +24,7 @@ from .cloud_credentials import CredentialStore
 from .cloud_entities import sync_entities, conflicts
 from .member_sync import _read_all, refresh_members, refresh_visiting_drivers
 from .race_upload import SupabaseRaceClient, UploadError, upload_pending, upload_pending_practice, upload_pending_deletions
+from .event_sync import sync_events
 
 DEFAULT_URL = "https://eottbwdcxrhgxadwnlmy.supabase.co"
 # Publishable client key only; authorization is enforced by the user's JWT + RLS.
@@ -170,6 +171,18 @@ class CloudService:
             return
         local = ClubStore(local_path)
         try:
+            for track in local.tracks():
+                if not target.track(track["id"]):
+                    target.save_track({"id": track["id"], "name": track["name"],
+                                       "addr": track.get("addr"), "width_m": track.get("width_m"),
+                                       "loop_width_m": track.get("loop_width_m"),
+                                       "min_lap_ms": track.get("min_lap_ms"),
+                                       "note": track.get("note"), "active": bool(track.get("active"))})
+            for member in local.members():
+                if member.get("source") in ("local", "local_guest") and not any(
+                    existing["id"] == member["id"] for existing in target.members()
+                ):
+                    target.save_member(member, _source=member["source"])
             for row in local._conn.execute(
                 "SELECT id FROM race WHERE club_id IS NULL OR club_id = '' OR club_id = 'club-local'"
             ).fetchall():
@@ -179,6 +192,15 @@ class CloudService:
             for session in local.practice_sessions(1000):
                 if session.get("club_id") in (None, "", "club-local"):
                     target.simpan_practice(session, club_id=club_id)
+            for row in local._conn.execute(
+                "SELECT * FROM event_meet WHERE club_id IS NULL OR club_id='' OR club_id='club-local'"
+            ).fetchall():
+                event = json.loads(row["document_json"])
+                event["club_id"] = club_id
+                target._conn.execute(
+                    "INSERT OR IGNORE INTO event_meet(id,club_id,document_json,updated_at) VALUES(?,?,?,?)",
+                    (row["id"], club_id, json.dumps(event, ensure_ascii=False), row["updated_at"]))
+            target._conn.commit()
         finally:
             local.close()
 
@@ -293,6 +315,7 @@ class CloudService:
                                 refresh_members(store, club["id"], client)
                                 refresh_visiting_drivers(store, club["id"], client)
                                 sync_entities(store, club["id"], client)
+                                sync_events(store, club["id"], client)
                                 store.set_club(name=club["name"], role="leader", synced_at=time.time())
                             except Exception as exc:
                                 # Entity/member refresh must not hide successful

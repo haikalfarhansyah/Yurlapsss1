@@ -90,6 +90,7 @@ const state = { trackId:null, presetId:null, peserta:[] };
 let sesi = null;        // snapshot dari server
 let dirty = false;
 let toastTimer = null;
+let eventTimingActive = false;
 
 function toast(msg){
   const t = $('toast');
@@ -122,6 +123,7 @@ async function muatAwal(){
   DATA.member = b.members || [];
   DATA.preset = b.presets || [];
   sesi = b.race;
+  eventTimingActive = !!b.active_event;
   state.trackId = sesi.track_id || (DATA.track[0] && DATA.track[0].id) || null;
   const c = sesi.cfg || {};
   const cocok = DATA.preset.find(p => p.name === c.nama);
@@ -129,6 +131,7 @@ async function muatAwal(){
   pulihkanPeserta();
   renderAll();
   renderHistory();
+  if(eventTimingActive) show('event');
 }
 
 /* Peserta sesi di server -> bentuk yang dipakai daftar peserta. */
@@ -149,12 +152,15 @@ async function segarkanSesi(){
 /* ============================================================================
    NAVIGASI
    ========================================================================== */
-const VIEWS = ['practice','quickrace','history','member','guest','track','decoder','sound'];
+const VIEWS = ['practice','quickrace','event','history','member','guest','track','decoder','sound'];
+window.YurLapsEventTimingLock = active => { eventTimingActive = !!active; };
 function show(v){
+  if(v === 'quickrace' && eventTimingActive){ v = 'event'; toast('Sesi Event sedang memakai timing'); }
   VIEWS.forEach(k => { const s = $('view-' + k); if(s) s.style.display = (k === v) ? '' : 'none'; });
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.view === v));
   window.scrollTo(0,0);
   if(v === 'history') renderHistory();
+  if(v === 'event' && window.YurLapsEventPage) window.YurLapsEventPage.open();
   if(v === 'practice'){renderPractice();refreshPractice();}
   if(v === 'member') renderMember();
   if(v === 'guest') { renderGuest(); refreshGuestCapture(); }
