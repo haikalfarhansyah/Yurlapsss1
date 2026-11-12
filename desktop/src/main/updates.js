@@ -1,5 +1,18 @@
 'use strict';
 
+/**
+ * Pesan error pembaruan harus ramah untuk operator. Respons mentah dari
+ * server (dumps HTTP) tidak pernah ditampilkan; hanya ringkasannya.
+ */
+function friendlyError(error) {
+  const raw = String((error && error.message) || error || '');
+  const missing = /\b404\b|NoSuchKey|Object not found|not found/i.test(raw);
+  if (missing) return 'Belum ada versi baru dipublikasikan. Periksa kembali nanti.';
+  const offline = /ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ETIMEDOUT|network|socket hang up/i.test(raw);
+  if (offline) return 'Tidak dapat terhubung ke server pembaruan. Periksa koneksi internet.';
+  return 'Pemeriksaan pembaruan gagal. Periksa koneksi internet lalu coba lagi.';
+}
+
 function configureUpdates({ app, ipcMain, autoUpdater, getWindow, prepare, stopEngine, cancel }) {
   const supported = app.isPackaged && process.platform === 'win32';
   let busy = false;
@@ -18,7 +31,10 @@ function configureUpdates({ app, ipcMain, autoUpdater, getWindow, prepare, stopE
   autoUpdater.on('update-not-available', () => publish({ state: 'current', error: '' }));
   autoUpdater.on('download-progress', p => publish({ state: 'downloading', progress: Math.round(p.percent) }));
   autoUpdater.on('update-downloaded', () => publish({ state: 'ready', progress: 100, error: '' }));
-  autoUpdater.on('error', error => publish({ state: 'error', error: error.message }));
+  autoUpdater.on('error', error => {
+    console.error('[yurlaps:update]', error);
+    publish({ state: 'error', error: friendlyError(error) });
+  });
 
   ipcMain.handle('yurlaps:update', async (event, action) => {
     const win = getWindow();
@@ -44,9 +60,10 @@ function configureUpdates({ app, ipcMain, autoUpdater, getWindow, prepare, stopE
       }
     } catch (error) {
       if (action === 'install') {
+        // Pesan dari backend sendiri (mis. "Simpan race sebelum memasang").
         await cancel().catch(() => {});
         publish({ state: 'ready', error: error.message });
-      } else publish({ state: 'error', error: error.message });
+      } else publish({ state: 'error', error: friendlyError(error) });
     } finally { busy = false; }
     return state;
   });

@@ -33,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -46,6 +47,40 @@ IS_WINDOWS = os.name == "nt"
 # The website publishes a JSON manifest alongside the Electron `latest.yml`.
 # The Python engine consumes JSON (`version`, `url`, `sha256`, `size`).
 DEFAULT_MANIFEST_URL = "https://yurlaps.dpdns.org/releases/manifest.json"
+
+# Pesan untuk operator. Respons mentah server tidak pernah ditampilkan.
+MSG_NO_RELEASE = "Belum ada versi baru dipublikasikan. Periksa kembali nanti."
+MSG_OFFLINE = "Tidak dapat terhubung ke server pembaruan. Periksa koneksi internet."
+MSG_FAILED = "Pemeriksaan pembaruan gagal. Periksa koneksi internet lalu coba lagi."
+
+
+def _friendly_error(exc: Exception) -> str:
+    """Terjemahkan galat jaringan/HTTP menjadi kalimat yang bisa dibaca.
+
+    Body respons disimpan di galat itu sendiri supaya fungsi ini boleh
+    dipanggil lebih dari sekali untuk galat yang sama (read() bersifat
+    sekali-pakai).
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        code = exc.code
+        body = getattr(exc, "yurlaps_body", None)
+        if body is None:
+            try:
+                body = exc.read().decode("utf-8", "replace")[:400]
+            except Exception:
+                body = ""
+            try:
+                exc.yurlaps_body = body
+            except Exception:
+                pass
+        if code == 404 or "NoSuchKey" in body or "Object not found" in body:
+            return MSG_NO_RELEASE
+        return MSG_FAILED
+    text = str(exc)
+    if any(word in text for word in ("timed out", "URLError", "Name or service",
+                                      "Temporary failure", "Connection", "reset by peer")):
+        return MSG_OFFLINE
+    return MSG_FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +160,15 @@ class Updater:
             return self.info()
         except Exception as exc:
             with self._lock:
+                message = _friendly_error(exc)
+                # Manifest belum ada (bucket rilis masih kosong) bukan galat.
+                if message == MSG_NO_RELEASE:
+                    self.state = "idle"
+                    self.error = message
+                    self._log("info", "Belum ada rilis Windows yang dipublikasikan.")
+                    return self.info()
                 self.state = "error"
-                self.error = str(exc)
+                self.error = message
             return self.info()
 
     def check_async(self) -> None:
@@ -192,7 +234,8 @@ class Updater:
         except Exception as exc:
             with self._lock:
                 self.state = "error"
-                self.error = str(exc)
+                # Galat unduhan: tampilkan kalimat singkat, bukan dump server.
+                self.error = _friendly_error(exc) if not isinstance(exc, RuntimeError) else str(exc)
             self._log("error", f"Gagal menyiapkan pembaruan: {exc}")
 
     # -- pasang --------------------------------------------------------

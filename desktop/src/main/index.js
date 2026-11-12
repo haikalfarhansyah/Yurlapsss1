@@ -28,7 +28,87 @@ const REPO = path.join(ROOT, '..');                     // .../stintlab
 let engine = null;
 /** @type {BrowserWindow | null} */
 let win = null;
+/** @type {BrowserWindow | null} */
+let splash = null;
 let engineUrl = '';
+let splashShownAt = 0;
+let mainRevealed = false;
+let revealTimer = null;
+
+// Splash minimal tampil beberapa saat supaya tidak berkedip saat mesin cepat.
+const SPLASH_MIN_MS = 600;
+// Kalau halaman tidak pernah memberi tahu "siap", jendela utama tetap dibuka.
+const REVEAL_FALLBACK_MS = 10000;
+
+// ---------------------------------------------------------------------------
+// 0. Jendela splash (logo + status) selama mesin Python menyiapkan diri
+// ---------------------------------------------------------------------------
+function createSplash() {
+  splash = new BrowserWindow({
+    width: 460,
+    height: 320,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    backgroundColor: '#0b6685',
+    title: 'YurLaps',
+    icon: path.join(ROOT, 'assets', 'yurlaps.ico'),
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  splash.setMenuBarVisibility(false);
+  splash.loadFile(path.join(__dirname, '..', 'splash.html'));
+  splash.once('ready-to-show', () => {
+    if (splash && !splash.isDestroyed()) splash.show();
+  });
+  // Tombol "Tutup" pada tampilan error: tutup jendela ini lalu keluar.
+  splash.on('closed', () => {
+    splash = null;
+    if (!mainRevealed) {
+      app.isQuiting = true;
+      app.quit();
+    }
+  });
+  splashShownAt = Date.now();
+}
+
+function splashStatus(message) {
+  if (!splash || splash.isDestroyed()) return;
+  splash.webContents.executeJavaScript(
+    `window.setSplashStatus && window.setSplashStatus(${JSON.stringify(String(message || ''))})`)
+    .catch(() => {});
+}
+
+function splashError(message) {
+  if (!splash || splash.isDestroyed()) return;
+  splash.webContents.executeJavaScript(
+    `window.setSplashError && window.setSplashError(${JSON.stringify(String(message || ''))})`)
+    .catch(() => {});
+}
+
+function closeSplash() {
+  if (!splash) return;
+  const target = splash;
+  splash = null;
+  try { target.destroy(); } catch { /* sudah tertutup */ }
+}
+
+/** Tampilkan jendela utama lalu tutup splash (dengan durasi minimum). */
+function revealMainWindow() {
+  if (mainRevealed) return;
+  mainRevealed = true;
+  if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+  // Splash tidak lagi mengambang di atas jendela utama.
+  if (splash && !splash.isDestroyed()) splash.setAlwaysOnTop(false);
+  if (win && !win.isDestroyed()) win.show();
+  const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - splashShownAt));
+  setTimeout(closeSplash, wait);
+}
 
 // ---------------------------------------------------------------------------
 // 1. Cari mesin Python
@@ -83,6 +163,10 @@ function startEngine() {
         if (line.startsWith('{')) {
           try {
             const msg = JSON.parse(line);
+            if (msg.event === 'progress') {
+              // Status proses dari mesin Python ditampilkan di splash.
+              splashStatus(msg.message);
+            }
             if (msg.event === 'ready' && !settled) {
               settled = true;
               clearTimeout(timer);
@@ -155,7 +239,11 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   win.loadURL(engineUrl);
 
-  win.once('ready-to-show', () => win.show());
+  // Jendela utama tetap tersembunyi sampai halaman memberi tahu data sudah
+  // siap; kalau sinyal tidak datang, buka juga setelah batas waktu.
+  win.once('ready-to-show', () => {
+    if (!revealTimer) revealTimer = setTimeout(revealMainWindow, REVEAL_FALLBACK_MS);
+  });
 
   const pushFullscreen = () => {
     if (win && !win.isDestroyed()) {
@@ -199,6 +287,8 @@ ipcMain.handle('yurlaps:open-external', (_event, url) => {
   if (!/^https?:\/\//i.test(url)) throw new Error('URL login tidak valid');
   return shell.openExternal(url);
 });
+// Halaman memberitahu data sudah siap -> tampilkan jendela utama, tutup splash.
+ipcMain.on('yurlaps:app-ready', () => revealMainWindow());
 
 // Satu instance saja: dua instance akan berebut port & data
 if (!app.requestSingleInstanceLock()) {
@@ -213,6 +303,8 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
+    createSplash();
+    splashStatus('Menyiapkan YurLaps…');
     try {
       await startEngine();
       createWindow();
@@ -241,9 +333,13 @@ if (!app.requestSingleInstanceLock()) {
         })
       });
     } catch (err) {
-      dialog.showErrorBox('YurLaps gagal dijalankan', String(err && err.message ? err.message : err));
-      app.isQuiting = true;
-      app.quit();
+      const message = String(err && err.message ? err.message : err);
+      splashError(message);
+      // Beri waktu pengguna membaca pesan di splash sebelum jendela ditutup.
+      setTimeout(() => {
+        app.isQuiting = true;
+        app.quit();
+      }, 12000);
     }
   });
 }
@@ -264,11 +360,13 @@ function stopEngine() {
 
 app.on('before-quit', () => {
   app.isQuiting = true;
+  closeSplash();
   stopEngine();
 });
 
 app.on('window-all-closed', () => {
   app.isQuiting = true;
+  closeSplash();
   stopEngine();
   app.quit();
 });

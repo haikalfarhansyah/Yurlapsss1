@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>YurLaps</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: linear-gradient(135deg, #08283e, #0b6685 55%, #10a7d4);
+    color: #fff; font-family: "Segoe UI", system-ui, sans-serif;
+    display: grid; place-items: center; overflow: hidden; user-select: none;
+  }
+  .wrap { width: 100%; padding: 34px 30px 30px; display: grid; justify-items: center; gap: 12px; text-align: center; }
+  .logo { width: 190px; height: auto; filter: brightness(0) invert(1); }
+  .title { font-size: 20px; font-weight: 800; letter-spacing: 3px; margin: 2px 0 0; }
+  .tagline { font-size: 10px; letter-spacing: 4px; font-weight: 700; opacity: .72; text-transform: uppercase; }
+  .status { margin-top: 16px; font-size: 11.5px; opacity: .85; display: flex; align-items: center; gap: 9px; min-height: 16px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #52e5b0; box-shadow: 0 0 0 5px rgba(82, 229, 176, .17); animation: pulse 1s infinite; }
+  .dot.error { background: #ffb4a2; box-shadow: 0 0 0 5px rgba(255, 180, 162, .18); animation: none; }
+  @keyframes pulse { 50% { opacity: .35; transform: scale(.8); } }
+  .error { display: none; margin-top: 14px; max-width: 380px; background: rgba(255, 255, 255, .12); border: 1px solid rgba(255, 255, 255, .22); border-radius: 12px; padding: 14px 16px; }
+  .error.show { display: block; }
+  .error p { margin: 0 0 12px; font-size: 11.5px; line-height: 1.5; opacity: .95; word-break: break-word; }
+  .error button { font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .5px; border: 0; border-radius: 9px; padding: 9px 18px; background: #fff; color: #0b6685; cursor: pointer; }
+  .error button:hover { background: #eaf6fb; }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <img class="logo" src="splash/yurlaps-logo.png" alt="YurLaps">
+    <div class="title">YURLAPS</div>
+    <div class="tagline">Timing &amp; Scoring</div>
+    <div class="status"><span class="dot" id="splashDot"></span><span id="splashStatus">Menyiapkan YurLaps…</span></div>
+    <div class="error" id="splashError">
+      <p id="splashErrorText"></p>
+      <button type="button" id="splashClose">Tutup</button>
+    </div>
+  </div>
+  <script>
+    window.setSplashStatus = function (text) {
+      const node = document.getElementById('splashStatus');
+      if (node && text) node.textContent = String(text);
+    };
+    window.setSplashError = function (text) {
+      const box = document.getElementById('splashError');
+      const label = document.getElementById('splashErrorText');
+      const dot = document.getElementById('splashDot');
+      if (label) label.textContent = String(text || 'Aplikasi gagal dimulai.');
+      if (box) box.classList.add('show');
+      if (dot) dot.classList.add('error');
+      window.setSplashStatus('Gagal memulai YurLaps');
+    };
+    document.getElementById('splashClose').addEventListener('click', function () { window.close(); });
+  </script>
+</body>
+</html>

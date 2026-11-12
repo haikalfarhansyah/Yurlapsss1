@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('yurlapsShell', {
   /** true = dibuka di jendela aplikasi (bukan di browser biasa) */
   isAppWindow: true,
   platform: process.platform,
+  /** Data sudah siap -> shell boleh menutup splash dan menampilkan jendela. */
+  appReady: () => ipcRenderer.send('yurlaps:app-ready'),
   /** Open the website login in the user's default browser. */
   openExternal: (url) => ipcRenderer.invoke('yurlaps:open-external', String(url || '')),
   update: action => ipcRenderer.invoke('yurlaps:update', action),

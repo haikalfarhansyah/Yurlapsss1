@@ -4,6 +4,7 @@ const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const token=new URLSearchParams(location.search).get('t');
 let events=[], selected=null, results=[], standings=[], members=[], tracks=[], presets=[], race=null, sync=null, tab='active';
+let schedule=null;
 let timer=null;
 
 async function api(path,body){
@@ -34,7 +35,11 @@ async function load(preferred){
   if(target&&events.some(e=>e.id===target)){
     const detail=await api('/api/event/detail?id='+encodeURIComponent(target));
     selected=detail.event;results=detail.results||[];standings=detail.standings||[];race=detail.race;sync=detail.sync;
-  }else{selected=null;results=[];standings=[];race=null;sync=null;}
+    try{
+      const sched=await api('/api/event/schedule?id='+encodeURIComponent(target));
+      schedule=sched.schedule||null;
+    }catch(_error){schedule=null;}
+  }else{selected=null;results=[];standings=[];race=null;sync=null;schedule=null;}
   render();
 }
 function renderTabs(){
@@ -42,7 +47,7 @@ function renderTabs(){
     button.classList.toggle('on',button.dataset.eventTab===tab);
     button.setAttribute('aria-selected',button.dataset.eventTab===tab?'true':'false');
   });
-  for(const key of ['active','create','history'])$('event-'+key).hidden=key!==tab;
+  for(const key of ['active','create','schedule','history'])$('event-'+key).hidden=key!==tab;
 }
 function renderList(){
   const active=events.filter(e=>e.status!=='completed');
@@ -105,6 +110,77 @@ function renderLive(){
   const rows=race?.klasemen||[];
   $('eventLive').innerHTML=`<p><b>${esc(live.name)}</b><br><span class="event-status">${esc(race?.status||'memuat')}</span></p><div class="event-board"><table><thead><tr><th>Pos</th><th>Driver</th><th class="r">Lap</th><th class="r">Best</th></tr></thead><tbody>${rows.map((d,i)=>`<tr><td>${esc(d.pos??i+1)}</td><td>${esc(d.nick||d.name)}</td><td class="r">${esc(d.n_lap??d.laps?.length??0)}</td><td class="r">${fmt(d.best_ms)}</td></tr>`).join('')}</tbody></table></div><p class="event-muted">Timing menggunakan decoder dan mesin race YurLaps.</p>`;
 }
+function startClock(ms){
+  if(ms==null||!Number.isFinite(Number(ms)))return 'belum diatur';
+  const date=new Date(Number(ms));
+  return String(date.getHours()).padStart(2,'0')+':'+String(date.getMinutes()).padStart(2,'0');
+}
+function durationText(ms){
+  if(!ms)return 'durasi belum ditentukan';
+  return Math.round(ms/60000)+' mnt';
+}
+function seedText(plan){
+  const seeding=plan.seeding||{};
+  const basis={roster:'urutan peserta',position:'posisi lintasan',result:'total waktu',best:'best lap',top3:'rata-rata 3 lap',consecutive:'3 lap berurutan'}[seeding.basis]||seeding.basis;
+  let text=(plan.source_kind==='roster'?'roster':'hasil '+plan.source_kind)+' · '+basis;
+  if(seeding.mode==='reverse')text+=' · balik grid';
+  if(seeding.drop)text+=' · buang '+seeding.drop+' terburuk';
+  return text;
+}
+function renderSchedule(){
+  const classes=selected?.classes||[];
+  const currentClass=$('eventPlanClass').value;
+  $('eventPlanClass').innerHTML=classes.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  if(classes.some(c=>c.id===currentClass))$('eventPlanClass').value=currentClass;
+  $('eventPlanPreset').innerHTML='<option value="">Atur langsung di bawah</option>'+presets.map(p=>`<option value="${esc(p.id)}">${esc(p.name)} · ${p.target==='laps'?esc(p.value)+' lap':esc(p.value)+' detik'}</option>`).join('');
+  const plans=schedule?.plans||[];
+  $('eventPlans').innerHTML=plans.length?plans.map(p=>`<div class="event-row"><div><b>${esc(p.name)}</b><div class="event-muted">${esc(className(p.class_id))} · ${esc(p.kind)} · ${p.max_group_size} peserta/grup · bump-up ${p.bump_up} · jeda ${Math.round((p.gap_ms||0)/60000)} mnt</div><small class="event-status">${esc(seedText(p))}</small></div><div class="actions"><button class="btn sm" data-plan-action="edit" data-id="${esc(p.id)}">Sunting</button><button class="btn sm" data-plan-action="generate" data-id="${esc(p.id)}">Buat sesi</button><button class="btn sm danger" data-plan-action="delete" data-id="${esc(p.id)}">Hapus</button></div></div>`).join(''):'<p class="note">Belum ada rencana. Tambahkan rencana agar peserta dibagi menjadi sesi secara otomatis.</p>';
+  const rows=schedule?.rows||[];
+  $('eventScheduleRows').innerHTML=rows.length?rows.map((row,index)=>{
+    const drivers=(row.drivers||[]).map(d=>d.nick||d.name).join(', ')||'Belum ada peserta';
+    const actions=[];
+    if(row.status==='planned'&&row.plan_id)actions.push(`<button class="btn sm" data-plan-action="reseed" data-id="${esc(row.stage_id)}">Seed ulang</button>`);
+    if(row.status==='planned'&&selected?.status==='running')actions.push(`<button class="btn sm primary" data-plan-action="start" data-id="${esc(row.stage_id)}">Jalankan</button>`);
+    return `<div class="event-row"><div><b>${index+1}. ${esc(row.name||'')} · ${esc(row.group||'')}</b><div class="event-muted">${esc(row.class_name||'')} · ${esc(row.kind)} · mulai ${esc(startClock(row.start_ms))} · ${esc(durationText(row.duration_ms))}</div><small class="event-status">${esc(row.seed_source||'Roster')} · ${esc(drivers)}</small></div><div class="actions">${actions.join('')}</div></div>`;
+  }).join(''):'<p class="note">Belum ada sesi terjadwal. Buat sesi dari rencana di atas.</p>';
+  const start=schedule?.start_at;
+  $('eventScheduleSummary').innerHTML=!selected?'':
+    `<div class="event-muted">Event</div><p><b>${esc(selected.name)}</b></p>`+
+    `<div class="event-muted">Jam mulai event</div><p>${esc(start?new Date(start*1000).toLocaleString('id-ID'):'belum diisi')}</p>`+
+    `<div class="event-muted">Urutan</div><p>${esc(schedule?.scheme?.type==='rounds'?'per ronde':'satu per satu')}</p>`+
+    `<div class="event-muted">Rencana / sesi</div><p>${plans.length} / ${rows.length}</p>`+
+    `<div class="event-muted">Sesi sudah tersimpan</div><p>${rows.filter(r=>r.status==='saved').length}</p>`;
+  if(document.activeElement!==$('eventScheduleStart'))$('eventScheduleStart').value=start?localInput(start*1000):'';
+  if(document.activeElement!==$('eventScheduleScheme'))$('eventScheduleScheme').value=schedule?.scheme?.type||'sequential';
+  if(document.activeElement!==$('eventScheduleFinalsByGroup'))$('eventScheduleFinalsByGroup').checked=!!schedule?.scheme?.finals_by_group;
+  const pdf=$('eventSchedulePdf');
+  pdf.href=selected?`/api/event/schedule/pdf?id=${encodeURIComponent(selected.id)}${token?'&t='+encodeURIComponent(token):''}`:'#';
+}
+function localInput(ms){
+  const date=new Date(Number(ms));
+  const pad=value=>String(value).padStart(2,'0');
+  return date.getFullYear()+'-'+pad(date.getMonth()+1)+'-'+pad(date.getDate())+'T'+pad(date.getHours())+':'+pad(date.getMinutes());
+}
+function fillPlanForm(id){
+  const plan=(schedule?.plans||[]).find(p=>p.id===id);
+  if(!plan)return;
+  const seeding=plan.seeding||{},cfg=plan.cfg||{};
+  $('eventPlanClass').value=plan.class_id;$('eventPlanKind').value=plan.kind;
+  $('eventPlanOrder').value=plan.order;$('eventPlanMaxGroup').value=plan.max_group_size;
+  $('eventPlanBumpUp').value=plan.bump_up;$('eventPlanSource').value=plan.source_kind;
+  $('eventPlanBasis').value=seeding.basis;$('eventPlanScope').value=seeding.scope;
+  $('eventPlanMode').value=seeding.mode;$('eventPlanRounds').value=seeding.rounds;
+  $('eventPlanDrop').value=seeding.drop;
+  $('eventPlanDuration').value=Math.round((plan.duration_ms||0)/60000);
+  $('eventPlanLapEstimate').value=Math.round((plan.estimate_lap_ms||0)/1000);
+  $('eventPlanGap').value=Math.round((plan.gap_ms||0)/60000);
+  $('eventPlanTarget').value=cfg.target||'time';
+  $('eventPlanValue').value=cfg.target==='laps'?(cfg.value||1):Math.ceil((cfg.target_time_ms||(cfg.value||180)*1000)/1000);
+  $('eventPlanStart').value=cfg.start_mode||'grid';
+  $('eventPlanRank').value=cfg.rank||'position';
+  $('eventPlanCountdown').value=cfg.cd||5;
+  $('eventPlanForm').dataset.edit=plan.id;
+}
 function render(){
   renderTabs();renderList();renderCreate();
   $('eventTitle').textContent=selected?.name||'Pilih event';
@@ -113,7 +189,7 @@ function render(){
   $('eventSync').innerHTML=!selected?'':sync?.conflict?'<p style="color:var(--bad)">Event berubah di aplikasi dan website. Pilih versi yang dipertahankan.</p><div class="actions"><button class="btn sm" data-event-resolve="remote">Pakai versi website</button><button class="btn sm danger" data-event-resolve="local">Kirim versi aplikasi</button></div>':sync?.pending?'Perubahan menunggu sinkronisasi':'Tersinkron';
   const actions=$('eventActions');
   actions.innerHTML=!selected?'':selected.status==='draft'?'<button class="btn primary" data-event-status="registration">Buka pendaftaran</button>':selected.status==='registration'?'<button class="btn primary" data-event-status="running">Mulai event</button>':selected.status==='running'?'<button class="btn" data-event-status="completed">Tutup event</button>':'';
-  renderEntries();renderStages();renderResults();renderLive();
+  renderEntries();renderStages();renderResults();renderLive();renderSchedule();
 }
 async function mutate(path,body){try{await api(path,body);await load(selected?.id);}catch(error){fail(error);}}
 
@@ -141,6 +217,22 @@ document.addEventListener('click',async event=>{
   if(stage&&selected){
     if(stage.dataset.stageAction==='save'&&!window.confirm('Akhiri sesi timing dan simpan hasilnya?'))return;
     await mutate('/api/event/stage/'+stage.dataset.stageAction,{event_id:selected.id,stage_id:stage.dataset.id});
+    return;
+  }
+  const planAction=event.target.closest('[data-plan-action]');
+  if(planAction&&selected){
+    const action=planAction.dataset.planAction,id=planAction.dataset.id;
+    if(action==='edit'){fillPlanForm(id);return;}
+    if(action==='delete'){
+      if(!window.confirm('Hapus rencana ini? Sesi terjadwal dari rencana ini ikut dihapus.'))return;
+      await mutate('/api/event/plan/delete',{event_id:selected.id,plan_id:id});return;
+    }
+    if(action==='generate'){
+      if(!window.confirm('Buat sesi dari rencana ini? Sesi terjadwal lama dari rencana yang sama diganti.'))return;
+      await mutate('/api/event/generate',{event_id:selected.id,plan_id:id});return;
+    }
+    if(action==='reseed'){await mutate('/api/event/stage/reseed',{event_id:selected.id,stage_id:id});return;}
+    if(action==='start'){await mutate('/api/event/stage/start',{event_id:selected.id,stage_id:id});return;}
   }
 });
 $('eventEntryMember').onchange=renderCars;
@@ -206,6 +298,49 @@ $('eventStageForm').onsubmit=async event=>{
   await mutate('/api/event/stage/add',{event_id:selected.id,class_id:$('eventStageClass').value,
     kind:$('eventStageKind').value,name:$('eventStageName').value,group:$('eventStageGroup').value,
     cfg,entry_ids:[...$('eventStageEntries').querySelectorAll('input:checked')].map(input=>input.value)});
+};
+$('eventScheduleForm').onsubmit=async event=>{
+  event.preventDefault();if(!selected)return;
+  const raw=$('eventScheduleStart').value;
+  const start_at=raw?Math.floor(new Date(raw).getTime()/1000):null;
+  await mutate('/api/event/schedule/scheme',{event_id:selected.id,
+    scheme:{type:$('eventScheduleScheme').value,finals_by_group:$('eventScheduleFinalsByGroup').checked},
+    start_at});
+};
+$('eventPlanForm').onsubmit=async event=>{
+  event.preventDefault();if(!selected)return;
+  const target=$('eventPlanTarget').value,value=Number($('eventPlanValue').value);
+  const cfg={name:'Jadwal '+selected.name,target,value,rank:$('eventPlanRank').value,
+    start_mode:$('eventPlanStart').value,cd:Number($('eventPlanCountdown').value),
+    random_delay_max:2,countdown_step_ms:1500,stagger_mode:'manual',stagger_gap_ms:10000,
+    finish_current_lap:false,target_time_ms:target==='time'?value*1000:null};
+  const plan={class_id:$('eventPlanClass').value,kind:$('eventPlanKind').value,
+    order:Number($('eventPlanOrder').value),max_group_size:Number($('eventPlanMaxGroup').value),
+    bump_up:Number($('eventPlanBumpUp').value),source_kind:$('eventPlanSource').value,
+    seeding:{basis:$('eventPlanBasis').value,scope:$('eventPlanScope').value,mode:$('eventPlanMode').value,
+      rounds:Number($('eventPlanRounds').value),drop:Number($('eventPlanDrop').value)},
+    duration_ms:Number($('eventPlanDuration').value)*60000,
+    estimate_lap_ms:Number($('eventPlanLapEstimate').value)*1000,
+    gap_ms:Number($('eventPlanGap').value)*60000,cfg};
+  const edit=$('eventPlanForm').dataset.edit;
+  if(edit)plan.id=edit;
+  await mutate('/api/event/plan/save',{event_id:selected.id,plan});
+  $('eventPlanForm').dataset.edit='';
+};
+$('eventPlanReset').onclick=()=>{
+  $('eventPlanForm').reset();$('eventPlanForm').dataset.edit='';
+  $('eventPlanOrder').value=1;$('eventPlanMaxGroup').value=8;$('eventPlanBumpUp').value=0;
+  $('eventPlanRounds').value=1;$('eventPlanDrop').value=0;$('eventPlanDuration').value=0;
+  $('eventPlanLapEstimate').value=0;$('eventPlanGap').value=5;$('eventPlanCountdown').value=5;
+};
+$('eventPlanPreset').onchange=()=>{
+  const preset=presets.find(p=>p.id===$('eventPlanPreset').value);
+  if(!preset)return;
+  $('eventPlanTarget').value=preset.target;
+  $('eventPlanValue').value=preset.target==='time'?Math.ceil((preset.target_time_ms||preset.value*1000)/1000):preset.value;
+  $('eventPlanStart').value=preset.start_mode;
+  $('eventPlanRank').value=preset.rank==='lapsTime'?'result':preset.rank;
+  $('eventPlanCountdown').value=preset.cd;
 };
 window.YurLapsEventPage={open:()=>load().catch(fail)};
 timer=setInterval(async()=>{

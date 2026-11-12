@@ -12,6 +12,7 @@ Tes otomatis dijalankan oleh workflow Build Windows dan harus hijau sebelum rili
 | Startup | Logo, UI lengkap, Practice paling atas, tanpa data atau login demo | app/static/quickrace.html, app/main.py |
 | Akun | Login email/password nyata, nama akun, pilihan club, logout | app/cloud.py, app/webapp.py |
 | Practice | Otomatis ketika tidak ada race; sesi per driver; log dikelompokkan per member; detail lap dan statistik lengkap | app/practice.py, app/static/quickrace.js |
+| Jadwal | Rencana sesi membagi peserta menjadi grup; seeding dari hasil ronde sebelumnya; bump-up; jam mulai per sesi; urutan sesuai skema; PDF jadwal; ikut tampil di website | app/schedule.py, app/schedule_report.py, app/static/event.js |
 | Practice cloud | Sesi selesai masuk antrean, dikirim ke dashboard pribadi; privasi di website | app/race_upload.py, website |
 | Preset | CRUD/duplikat; countdown; random delay 1-3; lap/time; selesaikan lap saat timeout; grid/staggered/manual/auto/gap; ranking dan penjelasan | app/race_config.py, app/static/quickrace.js |
 | Timing | Passing pertama baseline; lap pertama passing kedua; grid waktu global; staggered waktu pribadi; target setiap driver sendiri | app/race.py |
@@ -28,6 +29,8 @@ Tes otomatis dijalankan oleh workflow Build Windows dan harus hijau sebelum rili
 | PDF | Download PDF asli, leaderboard/data yang sama, header/tabel tidak terpotong | app/race_report.py |
 | Website | Community publik tanpa login, card dapat dibuka, foto club, personal dashboard, top 10 race-only per track | repository website |
 | Update | Download via website, unduh di aplikasi, larang install saat race aktif/belum disimpan, data dipertahankan | desktop/src/main/updates.js |
+| Update belum ada rilis | Bucket rilis kosong (belum ada tag `v*`) -> pesan ramah "Belum ada versi baru dipublikasikan", bukan dump HTTP | app/updater.py, desktop/src/main/updates.js |
+| Splash | Jendela splash tampil saat aplikasi dibuka, menampilkan status proses mesin, ditutup setelah data siap; galat mesin tampil di splash | desktop/src/main/index.js, desktop/src/splash.html, app/main.py |
 
 ## Gerbang tes otomatis
 

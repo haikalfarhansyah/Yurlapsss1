@@ -9,6 +9,7 @@ Dua cara pakai:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import socket
@@ -63,6 +64,7 @@ class YurLaps:
             self.cfg.zmq_endpoint = args.endpoint
 
         self.bus = EventBus()
+        _progress("Membuka database lokal")
         self.storage = Storage()
         self.engine = Engine(self.cfg, storage=self.storage,
                              on_event=self.bus.publish)
@@ -97,9 +99,11 @@ class YurLaps:
         sehingga tidak ada dialog firewall dan tidak bisa dibuka dari
         jaringan. Kembalian: (host, port) untuk shell Electron.
         """
+        _progress("Menghubungkan decoder")
         self._start_engine()
         from .webapp import start_server
 
+        _progress("Menyiapkan antarmuka")
         self.httpd = start_server(self.ctx, "127.0.0.1", 0, block=False)
         port = self.httpd.server_address[1]
         self.engine.log("info", f"Jendela aplikasi: http://127.0.0.1:{port}/")
@@ -294,19 +298,29 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _progress(message: str) -> None:
+    """Kirim status proses ke shell Electron (satu baris JSON di stdout)."""
+    try:
+        print(json.dumps({"event": "progress", "message": message}), flush=True)
+    except Exception:
+        pass
+
+
 def run_electron(args) -> int:
     """Dijalankan oleh shell Electron (Node) sebagai proses anak.
 
-    Protokolnya sederhana: cetak satu baris JSON berisi port ke stdout, lalu
-    tunggu sampai induk menutup stdin atau mengirim SIGTERM. Tidak ada jendela,
-    tidak ada browser, tidak ada port yang terbuka ke jaringan.
+    Protokolnya sederhana: cetak baris JSON berisi status proses, lalu satu
+    baris {"event":"ready",...} berisi port ke stdout, lalu tunggu sampai induk
+    menutup stdin atau mengirim SIGTERM. Tidak ada jendela, tidak ada browser,
+    tidak ada port yang terbuka ke jaringan.
     """
-    import json
     import signal
     import threading
 
     _safe_console()
+    _progress("Menyiapkan konfigurasi")
     app = YurLaps(args)
+    _progress("Menyiapkan mesin timing")
     host, port = app.start_electron()
     print(json.dumps({"event": "ready", "host": host, "port": port,
                       "version": APP_VERSION}), flush=True)

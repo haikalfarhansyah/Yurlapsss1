@@ -52,6 +52,45 @@ Jalur `stintlab.spec` adalah fallback developer dan bukan installer utama.
 6. Verifikasi halaman download website dan menu Pembaruan di aplikasi Windows
    versi sebelumnya. Pengguna mengunduh dari domain website tanpa pindah GitHub.
 
+### Rilis hanya terbit lewat tag
+
+Bucket `yurlaps-releases` di Supabase **tidak terisi** sampai tag `v*` di-push.
+Langkah "Publikasikan rilis ke website" pada workflow hanya berjalan kalau
+`github.ref` diawali `refs/tags/v`. Sebelum tag pertama terbit, permintaan ke
+`/releases/latest.yml` dan `/releases/manifest.json` menjawab `404 NoSuchKey`
+(diteruskan sebagai HTTP 400 + body JSON dari Supabase Storage).
+
+Aplikasi sudah menangani kondisi itu dengan kalimat ramah
+("Belum ada versi baru dipublikasikan. Periksa kembali nanti."), bukan
+dump respons server. Error asli tetap ditulis ke log konsol.
+
+Verifikasi setelah tag terbit:
+
+```
+GET https://yurlaps.dpdns.org/releases/latest.yml     -> 200 (YAML)
+GET https://yurlaps.dpdns.org/releases/manifest.json  -> 200 (JSON)
+```
+
+Kalau masih `404`, cek tiga hal: tag `v*` benar-benar ada di repo aplikasi,
+secrets CI sudah terisi, dan langkah publish di log workflow tidak gagal.
+
+### Menerbitkan tanpa CI
+
+Setelah `build_exe.bat` selesai di folder `app`:
+
+```bash
+cd app
+set YURLAPS_SUPABASE_URL=https://<project>.supabase.co
+set YURLAPS_SUPABASE_SERVICE_ROLE_KEY=<service-role>
+set YURLAPS_RELEASE_VERSION=0.4.2
+set YURLAPS_RELEASE_DIR=dist-electron
+node tools/publish_release.mjs
+```
+
+Skrip mengunggah `YurLaps-Setup-<versi>.exe`, `.exe.blockmap`, `latest.yml`,
+dan `manifest.json`. Installer wajib ada; `latest.yml` boleh tidak ada
+(electron-updater butuh file itu, jadi pastikan ikut terunggah).
+
 Jangan menimpa binary untuk versi yang sudah terpasang di pengguna. Naikkan versi
 jika memperbaiki release yang sudah dipublikasikan, karena updater membandingkan
 versi aplikasi. Perubahan source lokal belum mengubah release yang ada di website.

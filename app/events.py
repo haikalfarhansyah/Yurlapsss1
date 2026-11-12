@@ -6,6 +6,8 @@ import time
 import uuid
 
 from .race_config import normalize
+from .schedule import (build_plan_stages, compute_schedule, merge_rows,
+                       normalize_plan, normalize_scheme)
 
 
 KINDS = {"practice", "qualifying", "heat", "main", "final"}
@@ -39,6 +41,19 @@ def _points(raw):
     return values
 
 
+def _start_at(raw):
+    """Jam mulai event (epoch detik) untuk hitung jadwal sesi."""
+    if raw in (None, ""):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError("Jam mulai event tidak valid")
+    if value <= 0:
+        raise ValueError("Jam mulai event tidak valid")
+    return value
+
+
 class EventStore:
     def __init__(self, club):
         self.club = club
@@ -53,6 +68,9 @@ class EventStore:
     def _save(self, event):
         event["updated_at"] = time.time()
         event["revision"] = int(event.get("revision", 0)) + 1
+        # Jadwal ikut di dalam dokumen Event supaya website menampilkan urutan
+        # dan jam mulai yang sama dengan aplikasi.
+        event["schedule"] = compute_schedule(event, event.get("stages") or [])
         self.club._conn.execute(
             "INSERT INTO event_meet(id,club_id,document_json,updated_at) VALUES(?,?,?,?) "
             "ON CONFLICT(id) DO UPDATE SET club_id=excluded.club_id, "
@@ -135,6 +153,8 @@ class EventStore:
                 "points_table": _points(data.get("points_table")),
                 "classes": [{"id": _id(), "name": name} for name in names],
                 "entries": [], "stages": [], "created_at": time.time(), "revision": 0,
+                "plans": [], "schedule_scheme": {"type": "sequential", "finals_by_group": False},
+                "start_at": _start_at(data.get("start_at")),
             }
             return self._save(event)
 
@@ -302,6 +322,8 @@ class EventStore:
                 stage["race_id"] = race_id
             self._save(event)
             if status == "saved":
+                # Sesi tersimpan jadi sumber seeding untuk sesi berikutnya.
+                self._reseed_planned(event, stage)
                 event["published_standings"] = self.standings(event_id)
                 self._save(event)
             return stage
@@ -315,6 +337,149 @@ class EventStore:
             stage["interrupted_at"] = time.time()
             self._save(event)
             return stage
+
+    # ------------------------------------------------------------------
+    # Jadwal: rencana, seeding, dan urutan sesi
+    # ------------------------------------------------------------------
+    def _source_rows(self, event, plan):
+        """Hasil sesi sebelumnya sebagai sumber seeding."""
+        kind = plan.get("source_kind")
+        if not kind or kind == "roster":
+            return []
+        rounds = int((plan.get("seeding") or {}).get("rounds") or 1)
+        stages = [s for s in event.get("stages") or []
+                  if s.get("class_id") == plan.get("class_id") and s.get("kind") == kind
+                  and s.get("status") == "saved" and s.get("race_id")]
+        stages.sort(key=lambda s: int(s.get("sequence") or 0))
+        sessions = []
+        for stage in stages[-rounds:]:
+            race = self.club.race(stage["race_id"])
+            if race:
+                sessions.append(race.get("drivers") or [])
+        basis = (plan.get("seeding") or {}).get("basis", "roster")
+        return merge_rows(sessions, basis)
+
+    def save_plan(self, event_id, data):
+        with self.club.lock:
+            event = self.get(event_id)
+            if event["status"] == "completed":
+                raise ValueError("Event sudah selesai")
+            raw = dict(data.get("plan") or {})
+            plan_id = str(raw.get("id") or data.get("plan_id") or "")
+            base = next((p for p in event.get("plans") or [] if p.get("id") == plan_id), None)
+            plan = normalize_plan(raw, base=base)
+            if not any(c["id"] == plan["class_id"] for c in event["classes"]):
+                raise ValueError("Kelas event tidak ditemukan")
+            plans = [p for p in event.get("plans") or [] if p.get("id") != plan["id"]]
+            plans.append(plan)
+            plans.sort(key=lambda p: (int(p.get("order") or 0), str(p.get("id"))))
+            event["plans"] = plans
+            self._save(event)
+            return plan
+
+    def delete_plan(self, event_id, plan_id):
+        with self.club.lock:
+            event = self.get(event_id)
+            plans = event.get("plans") or []
+            remaining = [p for p in plans if p.get("id") != plan_id]
+            if len(remaining) == len(plans):
+                raise ValueError("Rencana tidak ditemukan")
+            event["plans"] = remaining
+            event["stages"] = [s for s in event.get("stages") or []
+                               if not (s.get("plan_id") == plan_id and s.get("status") == "planned")]
+            for index, item in enumerate(event["stages"], 1):
+                item["sequence"] = index
+            self._save(event)
+            return event
+
+    def generate_stages(self, event_id, plan_id):
+        with self.club.lock:
+            event = self.get(event_id)
+            if event["status"] == "completed":
+                raise ValueError("Event sudah selesai")
+            plan = next((p for p in event.get("plans") or [] if p.get("id") == plan_id), None)
+            if not plan:
+                raise ValueError("Rencana tidak ditemukan")
+            if not any(c["id"] == plan["class_id"] for c in event["classes"]):
+                raise ValueError("Kelas event tidak ditemukan")
+            rows = self._source_rows(event, plan)
+            created = build_plan_stages(event, plan, rows)
+            kept = [s for s in event.get("stages") or []
+                    if not (s.get("plan_id") == plan_id and s.get("status") == "planned")]
+            for stage in created:
+                stage["sequence"] = len(kept) + 1
+                kept.append(stage)
+            event["stages"] = kept
+            self._save(event)
+            return {"event": event, "stages": created}
+
+    def update_stage_entries(self, event_id, stage_id, entry_ids):
+        with self.club.lock:
+            event, stage = self.stage(event_id, stage_id)
+            if stage["status"] != "planned":
+                raise ValueError("Hanya sesi terjadwal yang bisa diubah")
+            eligible = {e["id"] for e in event["entries"] if e["class_id"] == stage["class_id"]}
+            chosen = [x for x in (entry_ids or []) if x in eligible]
+            stage["entry_ids"] = chosen
+            stage["seed_manual"] = True
+            self._save(event)
+            return stage
+
+    def reseed_stage(self, event_id, stage_id):
+        with self.club.lock:
+            event, stage = self.stage(event_id, stage_id)
+            if stage["status"] != "planned":
+                raise ValueError("Hanya sesi terjadwal yang bisa di-seed ulang")
+            plan = next((p for p in event.get("plans") or [] if p.get("id") == stage.get("plan_id")), None)
+            if not plan:
+                raise ValueError("Sesi ini tidak berasal dari rencana")
+            rows = self._source_rows(event, plan)
+            created = build_plan_stages(event, plan, rows)
+            match = next((s for s in created if s["group"] == stage["group"]), None)
+            if not match:
+                raise ValueError("Grup sesi ini tidak ada lagi pada rencana")
+            stage["entry_ids"] = match["entry_ids"]
+            stage["seed_source"] = match["seed_source"]
+            stage["seed_manual"] = False
+            self._save(event)
+            return stage
+
+    def _reseed_planned(self, event, stage):
+        """Perbarui isi sesi terjadwal yang sumbernya sesi yang baru saja disimpan."""
+        changed = False
+        for plan in event.get("plans") or []:
+            if plan.get("source_kind") != stage.get("kind"):
+                continue
+            if plan.get("class_id") != stage.get("class_id"):
+                continue
+            rows = self._source_rows(event, plan)
+            for existing in event.get("stages") or []:
+                if existing.get("plan_id") != plan.get("id"):
+                    continue
+                if existing.get("status") != "planned" or existing.get("seed_manual"):
+                    continue
+                created = build_plan_stages(event, plan, rows)
+                match = next((s for s in created if s["group"] == existing.get("group")), None)
+                if match and match["entry_ids"] != existing.get("entry_ids"):
+                    existing["entry_ids"] = match["entry_ids"]
+                    existing["seed_source"] = match["seed_source"]
+                    changed = True
+        return changed
+
+    def set_scheme(self, event_id, data):
+        with self.club.lock:
+            event = self.get(event_id)
+            event["schedule_scheme"] = normalize_scheme(data.get("scheme"))
+            event["start_at"] = _start_at(data.get("start_at"))
+            self._save(event)
+            return event
+
+    def schedule(self, event_id):
+        event = self.get(event_id)
+        return {"scheme": normalize_scheme(event.get("schedule_scheme")),
+                "start_at": event.get("start_at"),
+                "plans": event.get("plans") or [],
+                "rows": compute_schedule(event, event.get("stages") or [])}
 
     def race_is_linked(self, race_id):
         return any(stage.get("race_id") == race_id for event in self.list()

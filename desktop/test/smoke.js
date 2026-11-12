@@ -25,24 +25,30 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'LULUS' : 'GAGAL'}  ${name}${detail ? ' — ' + detail : ''}`);
 }
 
-function waitReady(child) {
+function waitReady(child, onProgress) {
   return new Promise((resolve, reject) => {
     let buf = '';
     const timer = setTimeout(() => reject(new Error('tidak ada ready dalam 40 s')), 40000);
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (d) => {
       buf += d;
-      const nl = buf.indexOf('\n');
-      if (nl < 0) return;
-      const line = buf.slice(0, nl).trim();
-      try {
-        const msg = JSON.parse(line);
-        if (msg.event === 'ready') {
-          clearTimeout(timer);
-          resolve(msg);
+      let nl;
+      // Mesin boleh mengirim banyak baris JSON (status proses) sebelum "ready".
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.event === 'progress') { if (onProgress) onProgress(msg); continue; }
+          if (msg.event === 'ready') {
+            clearTimeout(timer);
+            resolve(msg);
+            return;
+          }
+        } catch {
+          /* log biasa */
         }
-      } catch {
-        /* log biasa */
       }
     });
     child.stderr.setEncoding('utf8');
@@ -65,13 +71,52 @@ app.whenReady().then(async () => {
   });
 
   let msg;
+  const progress = [];
   try {
-    msg = await waitReady(child);
+    msg = await waitReady(child, (m) => progress.push(m));
     check('mesin mengirim ready', true, `${msg.host}:${msg.port}`);
   } catch (err) {
     check('mesin mengirim ready', false, String(err.message));
     app.exit(1);
     return;
+  }
+
+  check('mesin mengirim status proses untuk splash', progress.length >= 3,
+    progress.map((m) => m.message).join(' | '));
+  check('status proses punya pesan', progress.every((m) => typeof m.message === 'string' && m.message.length > 0));
+
+  // ---- splash: berkas, logo, dan fungsi statusnya ----
+  const splashFile = path.join(__dirname, '..', 'src', 'splash.html');
+  const splashLogo = path.join(__dirname, '..', 'src', 'splash', 'yurlaps-logo.png');
+  check('berkas splash ada', fs.existsSync(splashFile));
+  check('logo splash ada', fs.existsSync(splashLogo));
+  if (fs.existsSync(splashFile)) {
+    const splashWin = new BrowserWindow({ show: false, width: 460, height: 320,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    const splashLoaded = new Promise((resolve) => {
+      splashWin.webContents.once('did-finish-load', () => resolve(true));
+      splashWin.webContents.once('did-fail-load', (_e, code, desc) => resolve(`gagal ${code} ${desc}`));
+      setTimeout(() => resolve('timeout'), 15000);
+    });
+    splashWin.loadFile(splashFile);
+    const splashState = await splashLoaded;
+    check('splash termuat', splashState === true, String(splashState));
+    let splashInfo = {};
+    try {
+      splashInfo = await splashWin.webContents.executeJavaScript(`(() => ({
+        logo: document.querySelector('.logo') ? document.querySelector('.logo').naturalWidth : 0,
+        status: document.getElementById('splashStatus') ? document.getElementById('splashStatus').textContent : '',
+        fn: typeof window.setSplashStatus,
+        errFn: typeof window.setSplashError,
+      }))()`);
+    } catch (err) {
+      check('membaca isi splash', false, String(err.message));
+    }
+    check('logo splash termuat', (splashInfo.logo || 0) > 0, String(splashInfo.logo));
+    check('splash punya teks status', !!(splashInfo.status || '').length, splashInfo.status);
+    check('splash punya fungsi status', splashInfo.fn === 'function', String(splashInfo.fn));
+    check('splash punya fungsi galat', splashInfo.errFn === 'function', String(splashInfo.errFn));
+    splashWin.destroy();
   }
 
   check('server hanya di 127.0.0.1', msg.host === '127.0.0.1', msg.host);
@@ -111,6 +156,8 @@ app.whenReady().then(async () => {
       track: !!document.querySelector('[data-view="track"]'),
       decoder: !!document.querySelector('[data-view="decoder"]'),
       shell: !!(window.yurlapsShell && window.yurlapsShell.isAppWindow),
+      appReady: typeof (window.yurlapsShell || {}).appReady,
+      splashHidden: (() => { const s = document.getElementById('startupSplash'); return s ? s.hidden : false; })(),
       bodyText: (document.body.innerText || '').slice(0, 120).replace(/\\s+/g, ' '),
     }))()`);
   } catch (err) {
@@ -124,7 +171,20 @@ app.whenReady().then(async () => {
   check('menu Track ada', !!info.track);
   check('menu Decoder ada', !!info.decoder);
   check('preload aktif (mode aplikasi)', !!info.shell);
+  check('preload memberi appReady', info.appReady === 'function', String(info.appReady));
   check('UI ada isinya', (info.bodyText || '').length > 10, info.bodyText);
+
+  // Splash dalam halaman harus dilewati di mode jendela aplikasi (splash
+  // digantikan jendela splash shell Electron).
+  let splashHidden = false;
+  for (let i = 0; i < 30 && !splashHidden; i += 1) {
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      splashHidden = await win.webContents.executeJavaScript(
+        `(() => { const s = document.getElementById('startupSplash'); return s ? s.hidden : false; })()`);
+    } catch { /* abaikan */ }
+  }
+  check('splash dalam halaman dilewati di jendela aplikasi', splashHidden === true, String(splashHidden));
 
   // ---- tutup: mesin harus ikut berhenti ----
   let exited = false;

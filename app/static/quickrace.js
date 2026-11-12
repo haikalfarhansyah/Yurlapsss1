@@ -1391,6 +1391,12 @@ $('sesiPdf').onclick=async()=>{
 (async function init(){
   try{
     await muatAwal();
+    // Di jendela aplikasi, splash ditangani shell Electron: sembunyikan splash
+    // dalam halaman lalu beri tahu shell data sudah siap.
+    if(window.yurlapsShell?.isAppWindow){
+      const s=$('startupSplash');if(s)s.hidden=true;
+      try{window.yurlapsShell.appReady();}catch(_e){}
+    }
     await renderHistory();
     show('practice');
     // Jangan menimpa keadaan sesi: kalau aplikasi dibuka ulang di tengah
@@ -1416,7 +1422,12 @@ $('sesiPdf').onclick=async()=>{
       + '<div class="sub">' + esc(e.message || '') + '</div>'
       + '<div class="note">Aplikasi ini memerlukan proses YurLaps di komputer yang sama. '
       + 'Tutup lalu jalankan ulang YurLaps.</div></div></div>');
+    // Jangan tahan splash: operator harus melihat pesan galatnya.
+    if(window.yurlapsShell?.isAppWindow){try{window.yurlapsShell.appReady();}catch(_e){}}
   }
-  setTimeout(()=>{const s=$('startupSplash'); if(s){s.classList.add('hide');setTimeout(()=>s.hidden=true,550);}},700);
+  // Splash dalam halaman hanya untuk mode browser/source; di jendela aplikasi
+  // splash diatur shell Electron.
+  if(!window.yurlapsShell?.isAppWindow)
+    setTimeout(()=>{const s=$('startupSplash'); if(s){s.classList.add('hide');setTimeout(()=>s.hidden=true,550);}},700);
 })();
 })();

@@ -598,6 +598,7 @@
       <div class="event-tabs" role="tablist" aria-label="Bagian Event">
         <button type="button" data-event-tab="active" class="on">Event aktif</button>
         <button type="button" data-event-tab="create">Buat event</button>
+        <button type="button" data-event-tab="schedule">Jadwal</button>
         <button type="button" data-event-tab="history">Riwayat event</button>
       </div>
       <section id="event-active">
@@ -634,6 +635,45 @@
         <form id="eventCreateForm" class="event-form"><label>Nama event<input id="eventName" required maxlength="100"></label><label>Tanggal<input id="eventDate" type="date" required></label><label>Track<select id="eventTrack" required></select></label><label>Format<select id="eventFormat"><option value="qualifying_main">Kualifikasi → Main</option><option value="heat_final">Heat → Final</option></select></label><label class="wide">Kelas (pisahkan dengan koma)<input id="eventClasses" placeholder="Contoh: 1/10 Buggy, 1/8 Buggy" required></label><label>Leg terbaik dihitung<input id="eventBestLegs" type="number" min="1" max="10" value="1" required></label><label class="wide">Poin per posisi (pisahkan dengan koma)<input id="eventPoints" value="25,18,15,12,10,8,6,4,2,1" required></label><div class="foot"><button class="btn primary" type="submit">Simpan event</button></div></form>
       </div></section>
       <section id="event-history" hidden><div class="event-layout"><div><div id="eventHistoryDetail" class="card"></div></div><div id="eventHistoryList" class="event-list"></div></div></section>
+      <section id="event-schedule" hidden><div class="event-layout"><div>
+        <div class="card"><h3>Pengaturan jadwal</h3>
+          <form id="eventScheduleForm" class="event-form">
+            <label>Jam mulai event<input id="eventScheduleStart" type="datetime-local"></label>
+            <label>Urutan sesi<select id="eventScheduleScheme"><option value="sequential">Satu per satu (kelas demi kelas)</option><option value="rounds">Per ronde (semua kelas bersama)</option></select></label>
+            <label class="wide"><input id="eventScheduleFinalsByGroup" type="checkbox" style="display:inline;width:auto;margin-right:6px">Final diurutkan per grup</label>
+            <div class="foot"><button class="btn primary" type="submit">Simpan pengaturan jadwal</button></div>
+          </form>
+          <p class="event-muted">Jam mulai dipakai untuk menghitung mulai tiap sesi. Durasi diambil dari target preset; jeda antar sesi diatur pada tiap rencana.</p>
+        </div>
+        <div class="card"><h3>Rencana sesi</h3><div id="eventPlans"></div>
+          <form id="eventPlanForm" class="event-form">
+            <label>Kelas<select id="eventPlanClass" required></select></label>
+            <label>Jenis sesi<select id="eventPlanKind"><option value="qualifying">Kualifikasi</option><option value="heat">Heat</option><option value="main">Main</option><option value="final">Final</option><option value="practice">Practice terjadwal</option></select></label>
+            <label>Urutan ronde<input id="eventPlanOrder" type="number" min="1" max="99" value="1" required></label>
+            <label>Peserta per grup<input id="eventPlanMaxGroup" type="number" min="2" max="24" value="8" required></label>
+            <label>Bump-up (peserta naik dari grup berikut)<input id="eventPlanBumpUp" type="number" min="0" max="6" value="0" required></label>
+            <label>Sumber peserta<select id="eventPlanSource"><option value="roster">Roster (urutan peserta)</option><option value="qualifying">Hasil Kualifikasi</option><option value="heat">Hasil Heat</option><option value="main">Hasil Main</option><option value="final">Hasil Final</option></select></label>
+            <label>Dasar seeding<select id="eventPlanBasis"><option value="roster">Urutan peserta</option><option value="position">Posisi lintasan</option><option value="result">Total waktu</option><option value="best">Best lap</option><option value="top3">Rata-rata 3 lap</option><option value="consecutive">3 lap berurutan</option></select></label>
+            <label>Pembagian grup<select id="eventPlanScope"><option value="front">Teratas di grup A</option><option value="even">Rata (teratas dan terbawah campur)</option></select></label>
+            <label>Arah seeding<select id="eventPlanMode"><option value="forward">Terbaik lebih dulu</option><option value="reverse">Balik grid</option></select></label>
+            <label>Ronde yang dinilai<input id="eventPlanRounds" type="number" min="1" max="10" value="1" required></label>
+            <label>Buang pembalap terburuk<input id="eventPlanDrop" type="number" min="0" max="99" value="0" required></label>
+            <label>Durasi sesi (menit, 0 = dari preset)<input id="eventPlanDuration" type="number" min="0" max="1440" value="0" required></label>
+            <label>Estimasi waktu lap (detik, untuk target lap)<input id="eventPlanLapEstimate" type="number" min="0" max="600" value="0" required></label>
+            <label>Jeda antar sesi (menit)<input id="eventPlanGap" type="number" min="0" max="240" value="5" required></label>
+            <label class="wide">Salin pengaturan dari preset (opsional)<select id="eventPlanPreset"><option value="">Atur langsung di bawah</option></select></label>
+            <label>Target<select id="eventPlanTarget"><option value="time">Waktu</option><option value="laps">Lap</option></select></label>
+            <label>Nilai target (detik atau lap)<input id="eventPlanValue" type="number" min="1" value="180" required></label>
+            <label>Start<select id="eventPlanStart"><option value="grid">Grid</option><option value="staggered">Staggered</option></select></label>
+            <label>Penilaian<select id="eventPlanRank"><option value="position">Posisi lintasan</option><option value="result">Lap dan total waktu</option><option value="best">Best lap</option><option value="top3">Rata-rata 3 lap</option><option value="consecutive">3 lap berurutan</option></select></label>
+            <label>Countdown (detik)<input id="eventPlanCountdown" type="number" min="0" max="60" value="5" required></label>
+            <div class="foot"><button class="btn primary" type="submit">Simpan rencana</button><button class="btn" type="button" id="eventPlanReset">Bersihkan</button></div>
+          </form>
+        </div>
+        <div class="card"><h3>Urutan sesi</h3><div id="eventScheduleRows"></div>
+          <div class="actions"><a class="btn sm" id="eventSchedulePdf" href="#" download>Unduh PDF jadwal</a></div>
+        </div>
+      </div><div><div class="side-card"><h3>Ringkasan jadwal</h3><div id="eventScheduleSummary"></div></div></div></div></section>
     </div>
 
     <!-- ==================== HISTORY RACE ==================== -->

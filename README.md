@@ -26,6 +26,11 @@ Lihat [panduan build](PANDUAN-BUILD-EXE.md) dan
   detail per sesi/per lap, penutupan sesi setelah idle, dan antrean sinkronisasi.
 - **Quick Race**: track aktif, preset, peserta, countdown, grid/staggered, target
   lap/waktu, pilihan ranking, leaderboard, detail driver, dan passing log.
+- **Event**: pendaftaran dan check-in peserta per kelas, sesi (kualifikasi,
+  heat, main, final, practice), hasil per sesi, dan klasemen event.
+- **Jadwal**: rencana sesi (bagi peserta menjadi grup, seeding dari ronde
+  sebelumnya, bump-up), urutan sesi dengan jam mulai, sumber peserta tiap sesi,
+  dan cetak PDF jadwal.
 - **History Race**: hasil tersimpan, status sinkronisasi otomatis, PDF, dan hapus.
 - **Member**: cache member club, nama/nick/TTS/foto/mobil/transponder dan driver offline.
 - **Track**: tambah/edit/hapus, track aktif, lebar loop dalam meter, minimum lap
@@ -50,6 +55,10 @@ termasuk dalam ZIP produksi.
 6. Practice mencatat passing secara otomatis. Untuk race, buat preset, pilih
    peserta, lalu Start. Finish membuka pilihan Simpan/Buang/Batal; Batal tidak
    menghentikan race. Reset tersedia setelah sesi diputuskan.
+7. Untuk event dengan beberapa sesi, pakai tab **Jadwal**: susun rencana
+   (jumlah peserta per grup, sumber seeding), tekan **Buat sesi**, lalu isi jam
+   mulai event agar urutan dan jam tiap sesi tampil. Jadwal ikut tersinkron
+   ke website club.
 
 Passing pertama menjadi titik awal waktu driver, bukan lap 1. Passing berikutnya
 menghasilkan lap. Passing terlalu cepat tidak menjadi lap tetapi tetap tercatat
@@ -80,6 +89,11 @@ dibuka; SQL server dikelola terpisah.
 
 ## Website dan pembaruan
 
+Saat aplikasi dibuka, jendela splash tampil lebih dulu (logo + status proses:
+menyiapkan konfigurasi, membuka database, menghubungkan decoder, menyiapkan
+antarmuka) lalu jendela utama muncul setelah data siap. Kalau mesin gagal
+start, pesan galatnya tampil di dalam splash.
+
 Website dan Supabase harus diperbarui bersama agar kontrak sinkronisasi cocok.
 Migration tambahan:
 `final-website/supabase/migrations/20261107180000_production_timing_contract.sql`.
@@ -90,6 +104,11 @@ Installer Electron membaca rilis dari `https://yurlaps.dpdns.org/releases/`.
 Pembaruan diunduh dari domain website, lalu dipasang dengan restart tanpa
 uninstall. Gunakan menu Pembaruan. Source/browser mode tidak memasang update
 Windows. Rilis baru baru tersedia setelah build dan publikasi berhasil.
+
+Bucket rilis terisi **hanya** setelah tag `v<versi>` di-push: tag itu memicu
+workflow yang mengunggah installer, `latest.yml`, dan `manifest.json`. Sebelum
+itu, menu Pembaruan menampilkan "Belum ada versi baru dipublikasikan."
+(bukan dump respons server). Lihat `PANDUAN-BUILD-EXE.md`.
 
 ## Menjalankan source
 
@@ -117,6 +136,7 @@ python tests/test_integration.py
 python tests/test_manager.py
 node --check app/static/quickrace.js
 node --check app/static/sounds.js
+node --check app/static/event.js
 ```
 
 Tes memakai data terisolasi dan simulator khusus test. Hasil tes software tidak

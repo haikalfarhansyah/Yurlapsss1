@@ -540,6 +540,27 @@ def make_handler(ctx: AppContext):
                 except ValueError as exc:
                     return self._err(404, str(exc))
 
+            if path == "/api/event/schedule":
+                try:
+                    event_id = (qs.get("id") or [""])[0]
+                    store = EventStore(ctx.club)
+                    return self._json({"ok": True, "schedule": store.schedule(event_id)})
+                except ValueError as exc:
+                    return self._err(404, str(exc))
+
+            if path == "/api/event/schedule/pdf":
+                try:
+                    event_id = (qs.get("id") or [""])[0]
+                    store = EventStore(ctx.club)
+                    event = store.get(event_id)
+                    from .schedule_report import render_schedule_pdf
+                    body = render_schedule_pdf(event, store.schedule(event_id))
+                    return self._send(200, body, "application/pdf",
+                                      {"Content-Disposition":
+                                       'attachment; filename="YurLaps-jadwal.pdf"'})
+                except ValueError as exc:
+                    return self._err(404, str(exc))
+
             if path == "/api/race/state":
                 ctx.race.cek_waktu()
                 return self._json({"ok": True, "race": ctx.race.snapshot()})
@@ -797,6 +818,24 @@ def make_handler(ctx: AppContext):
                             raise ValueError("Sesi timing masih aktif; selesaikan dahulu")
                         return self._json({"ok": True, "stage": store.retry_interrupted_stage(
                             event_id, str(data.get("stage_id") or ""))})
+                    if path == "/api/event/plan/save":
+                        return self._json({"ok": True, "plan": store.save_plan(event_id, data)})
+                    if path == "/api/event/plan/delete":
+                        return self._json({"ok": True, "event": store.delete_plan(
+                            event_id, str(data.get("plan_id") or ""))})
+                    if path == "/api/event/generate":
+                        result = store.generate_stages(event_id, str(data.get("plan_id") or ""))
+                        return self._json({"ok": True, "event": result["event"],
+                                           "stages": result["stages"]})
+                    if path == "/api/event/stage/entries":
+                        return self._json({"ok": True, "stage": store.update_stage_entries(
+                            event_id, str(data.get("stage_id") or ""),
+                            data.get("entry_ids") or [])})
+                    if path == "/api/event/stage/reseed":
+                        return self._json({"ok": True, "stage": store.reseed_stage(
+                            event_id, str(data.get("stage_id") or ""))})
+                    if path == "/api/event/schedule/scheme":
+                        return self._json({"ok": True, "event": store.set_scheme(event_id, data)})
                     return self._err(404, "Rute event tidak ditemukan")
                 except (ValueError, TypeError, KeyError) as exc:
                     return self._err(409, str(exc))
