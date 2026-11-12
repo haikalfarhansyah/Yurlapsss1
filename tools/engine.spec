@@ -45,6 +45,8 @@ a = Analysis(
     hiddenimports=[
         "app.webapp", "app.cloud", "app.cloud_credentials", "app.cloud_entities",
         "app.member_sync", "app.race_upload", "app.club", "app.race_report", "app.race_results",
+        "app.schedule",         # mesin jadwal (dipakai app.events)
+        "app.schedule_report",  # PDF jadwal, diimpor di dalam fungsi
         "app.native",          # diimpor oleh modul main walau tidak dipakai
         "app.devices",
         "app.updater",

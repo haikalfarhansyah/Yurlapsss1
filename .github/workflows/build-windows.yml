@@ -346,14 +346,29 @@ jobs:
           $psi.RedirectStandardInput = $true
           $psi.UseShellExecute = $false
           $p = [System.Diagnostics.Process]::Start($psi)
-          $ready = $p.StandardOutput.ReadLineAsync()
-          if (-not $ready.Wait(60000)) { $p.Kill(); throw "mesin tidak siap dalam 60 detik" }
-          $line = $ready.Result
-          Write-Host "BARIS PERTAMA:" $line
-          if (-not $line -or -not $line.Contains('"event": "ready"')) {
+          # Mesin mengirim beberapa baris JSON: status proses ("progress")
+          # lebih dulu, lalu baris "ready". Baca SEMUA baris, jangan hanya yang
+          # pertama, dan tetap hormati batas waktu 60 detik.
+          $ready = $null
+          $progress = @()
+          while (-not $ready) {
+            $task = $p.StandardOutput.ReadLineAsync()
+            if (-not $task.Wait(60000)) { $p.Kill(); throw "mesin tidak siap dalam 60 detik" }
+            $line = $task.Result
+            if ($null -eq $line) { break }
+            Write-Host "BARIS:" $line
+            if ($line.Contains('"event": "progress"')) { $progress += $line; continue }
+            if ($line.Contains('"event": "ready"')) { $ready = $line }
+          }
+          if (-not $ready) {
             if (-not $p.HasExited) { $p.Kill() }
             throw "mesin tidak mengirim ready"
           }
+          if ($progress.Count -lt 1) {
+            if (-not $p.HasExited) { $p.Kill() }
+            throw "mesin tidak mengirim status proses untuk splash"
+          }
+          Write-Host "STATUS PROSES:" ($progress -join " | ")
           $p.StandardInput.Close()
           if (-not $p.WaitForExit(20000)) { $p.Kill(); throw "mesin tidak berhenti saat stdin ditutup" }
           Write-Host "OK: mesin siap dan berhenti rapi"
